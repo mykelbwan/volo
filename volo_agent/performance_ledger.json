@@ -1,0 +1,92 @@
+{
+  "swap:somnia testnet": {
+    "successes": 69,
+    "failures": 59,
+    "consecutive_failures": 0,
+    "total_runs": 128,
+    "avg_time": 0.04453374817967406,
+    "last_run": "2026-03-28T07:21:06.015973+00:00",
+    "error_distribution": {
+      "unknown": 23,
+      "logic": 18,
+      "network": 18
+    },
+    "recent_errors": [
+      {
+        "timestamp": "2026-03-22T18:44:22.493512+00:00",
+        "msg": "swap tool timeout after 0.01s",
+        "category": "network"
+      },
+      {
+        "timestamp": "2026-03-22T18:44:22.278313+00:00",
+        "msg": "bad params",
+        "category": "logic"
+      },
+      {
+        "timestamp": "2026-03-22T18:44:22.073948+00:00",
+        "msg": "boom: revert",
+        "category": "unknown"
+      },
+      {
+        "timestamp": "2026-03-22T18:44:21.862024+00:00",
+        "msg": "boom: revert",
+        "category": "unknown"
+      },
+      {
+        "timestamp": "2026-03-22T00:11:19.111268+00:00",
+        "msg": "swap tool timeout after 0.01s",
+        "category": "network"
+      }
+    ],
+    "fee_revenue_native": "0",
+    "fee_collections": 0
+  },
+  "check_balance:all_supported": {
+    "successes": 1,
+    "failures": 0,
+    "consecutive_failures": 0,
+    "total_runs": 1,
+    "avg_time": 10.026964664459229,
+    "last_run": "2026-03-24T08:14:39.680307+00:00",
+    "error_distribution": {},
+    "recent_errors": [],
+    "fee_revenue_native": "0",
+    "fee_collections": 0
+  },
+  "check_balance:base": {
+    "successes": 1,
+    "failures": 0,
+    "consecutive_failures": 0,
+    "total_runs": 1,
+    "avg_time": 5.00110387802124,
+    "last_run": "2026-03-24T08:14:44.709202+00:00",
+    "error_distribution": {},
+    "recent_errors": [],
+    "fee_revenue_native": "0",
+    "fee_collections": 0
+  },
+  "check_balance:somnia testnet": {
+    "successes": 1,
+    "failures": 0,
+    "consecutive_failures": 0,
+    "total_runs": 1,
+    "avg_time": 0.7654144763946533,
+    "last_run": "2026-03-24T08:50:54.095121+00:00",
+    "error_distribution": {},
+    "recent_errors": [],
+    "fee_revenue_native": "0",
+    "fee_collections": 0
+  },
+  "check_balance:base sepolia": {
+    "successes": 3,
+    "failures": 0,
+    "consecutive_failures": 0,
+    "total_runs": 3,
+    "avg_time": 4.104986270268758,
+    "last_run": "2026-03-26T01:32:38.751239+00:00",
+    "error_distribution": {},
+    "recent_errors": [],
+    "fee_revenue_native": "0",
+    "fee_collections": 0
+  }
+}
