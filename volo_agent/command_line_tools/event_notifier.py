@@ -1,3 +1,10 @@
+"""
+Event Notifier
+--------------
+Consumes Volo execution events from Redis Streams and notifies the client.
+intended to run as a separate process.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -26,11 +33,11 @@ def _load_local_env() -> None:
         pass
 
 
-from core.event_notifier_runtime import (
+from core.event_notifier_runtime import ( # noqa: E402
     run_notifier,
 )
-from core.utils.event_stream import event_stream_name
-from core.utils.upstash_client import get_upstash_client, upstash_configured
+from core.utils.event_stream import event_stream_name  # noqa: E402
+from core.utils.upstash_client import get_upstash_client, upstash_configured  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:

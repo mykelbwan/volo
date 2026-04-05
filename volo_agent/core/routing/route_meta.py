@@ -326,14 +326,14 @@ def route_meta_matches_node(
     return True
 
 
-def is_route_expired(route_meta: RouteMeta, now: int) -> bool:
+def is_route_expired(route_meta: RouteMeta | CanonicalRouteMeta, now: int) -> bool:
     expiry_timestamp = route_meta.expiry_timestamp
     return expiry_timestamp is not None and now > expiry_timestamp
 
 
 def log_route_validation(
     *,
-    route_meta: RouteMeta | None,
+    route_meta: RouteMeta | CanonicalRouteMeta | None,
     valid: bool,
     error: str | None = None,
     tool: str | None = None,
@@ -370,7 +370,7 @@ def log_fallback_event(
 
 def log_route_expiry(
     *,
-    route_meta: RouteMeta,
+    route_meta: RouteMeta | CanonicalRouteMeta,
     now: int,
 ) -> Dict[str, Any]:
     payload = _base_log_payload(route_meta)

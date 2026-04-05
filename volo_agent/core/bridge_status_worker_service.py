@@ -1,46 +1,12 @@
-"""
-Bridge Status Worker
---------------------
-Polls bridge transactions recorded in LangGraph state and updates their status
-per tick. Intended to run as a separate process.
-this tool is used in development only.
-
-Usage:
-  uv run command_line_tools/bridge_status_worker.py --interval 15
-  uv run command_line_tools/bridge_status_worker.py --once
-  BRIDGE_STATUS_WORKER_DEBUG=1 uv run command_line_tools/bridge_status_worker.py --interval 15
-"""
+"""Core bridge status worker service used by API hosts and CLI wrappers."""
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import os
 import sys
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple, cast
-
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-
-try:
-    from dotenv import find_dotenv, load_dotenv
-except Exception:  # pragma: no cover - optional dependency
-    load_dotenv = None
-    find_dotenv = None
-
-
-def _load_local_env() -> None:
-    if load_dotenv is None:
-        return
-    try:
-        env_path = find_dotenv(usecwd=True) if find_dotenv else ""
-        load_dotenv(env_path or None)
-    except Exception:
-        pass
-
 
 # Avoid noisy background analytics tasks when resuming async execution.
 os.environ.setdefault("DISABLE_CDP_USAGE_TRACKING", "true")
@@ -63,15 +29,10 @@ from core.bridge_status_runtime import (  # noqa: E402
 from core.bridge_status_worker_locks import (  # noqa: E402
     acquire_bridge_status_worker_lock as _acquire_lock,
 )
-from core.bridge_status_worker_locks import (  # noqa: E402
-    ensure_bridge_status_worker_lock_indexes as _ensure_lock_indexes,
-)
 from core.bridge_status_worker_runtime import (  # noqa: E402
     BridgeStatusWorkerRuntimeDeps,
+    run_bridge_status_loop,
     run_bridge_status_tick,
-)
-from core.bridge_status_worker_service import (  # noqa: E402
-    run_bridge_status_worker_loop,
 )
 from core.database.mongodb_async import AsyncMongoDB  # noqa: E402
 from core.history.task_history import (  # noqa: E402
@@ -860,7 +821,7 @@ async def _handle_terminal_events(
             )
 
 
-def _bridge_status_worker_runtime_deps() -> BridgeStatusWorkerRuntimeDeps:
+def build_bridge_status_worker_runtime_deps() -> BridgeStatusWorkerRuntimeDeps:
     from graph.graph import app
 
     return BridgeStatusWorkerRuntimeDeps(
@@ -878,84 +839,27 @@ def _bridge_status_worker_runtime_deps() -> BridgeStatusWorkerRuntimeDeps:
     )
 
 
-async def _run_once(interval_seconds: int, lock_ttl_seconds: int, owner: str) -> None:
+async def run_bridge_status_worker_once(lock_ttl_seconds: int, owner: str) -> None:
     await run_bridge_status_tick(
-        deps=_bridge_status_worker_runtime_deps(),
+        deps=build_bridge_status_worker_runtime_deps(),
         lock_ttl_seconds=lock_ttl_seconds,
         owner=owner,
     )
-    if interval_seconds <= 0:
-        return
 
 
-async def _run_loop(
+async def run_bridge_status_worker_loop(
     interval_seconds: int, lock_ttl_seconds: int, owner: str, *, once: bool
 ) -> None:
-    await run_bridge_status_worker_loop(
+    await run_bridge_status_loop(
+        deps=build_bridge_status_worker_runtime_deps(),
         interval_seconds=interval_seconds,
         lock_ttl_seconds=lock_ttl_seconds,
         owner=owner,
         once=once,
     )
 
-
-async def _main_async(args: argparse.Namespace) -> int:
-    if not args.skip_mongodb_healthcheck:
-        if not await AsyncMongoDB.ping():
-            print("MongoDB ping failed. Aborting worker startup.")
-            return 1
-
-    try:
-        await _ensure_lock_indexes()
-    except Exception as exc:
-        print(f"Failed to ensure bridge worker lock indexes: {exc}")
-        return 1
-
-    if _bool_env("SKIP_MONGODB_HEALTHCHECK", False):
-        print(
-            "SKIP_MONGODB_HEALTHCHECK is set; the graph may be using MemorySaver. "
-            "Unset it for worker updates to persist."
-        )
-
-    owner = f"bridge-worker-{uuid.uuid4().hex[:8]}"
-
-    await _run_loop(
-        args.interval,
-        args.lock_ttl_seconds,
-        owner,
-        once=args.once,
-    )
-    return 0
-
-
-def main() -> int:
-    _load_local_env()
-    parser = argparse.ArgumentParser(description="Bridge status polling worker.")
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=int(os.getenv("BRIDGE_STATUS_WORKER_INTERVAL_SECONDS", "15")),
-        help="Polling interval in seconds.",
-    )
-    parser.add_argument(
-        "--once",
-        action="store_true",
-        help="Run a single polling iteration and exit.",
-    )
-    parser.add_argument(
-        "--lock-ttl-seconds",
-        type=int,
-        default=int(os.getenv("BRIDGE_STATUS_WORKER_LOCK_TTL_SECONDS", "30")),
-        help="Per-thread lock TTL in seconds (0 disables locking).",
-    )
-    parser.add_argument(
-        "--skip-mongodb-healthcheck",
-        action="store_true",
-        help="Skip MongoDB ping check (not recommended).",
-    )
-    args = parser.parse_args()
-    return asyncio.run(_main_async(args))
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+__all__ = [
+    "build_bridge_status_worker_runtime_deps",
+    "run_bridge_status_worker_loop",
+    "run_bridge_status_worker_once",
+]

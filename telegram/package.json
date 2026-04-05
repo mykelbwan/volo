@@ -1,0 +1,24 @@
+{
+    "name": "telegram",
+    "version": "1.0.0",
+    "description": "",
+    "scripts": {
+        "dev": "ts-node src/main.ts",
+        "build": "tsc",
+        "start": "node dist/main.js"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "packageManager": "pnpm@10.33.0",
+    "devDependencies": {
+        "@types/node": "^25.5.2",
+        "ts-node": "^10.9.2",
+        "typescript": "^6.0.2"
+    },
+    "dependencies": {
+        "axios": "^1.14.0",
+        "dotenv": "^17.4.0",
+        "grammy": "^1.42.0"
+    }
+}

@@ -1,16 +1,16 @@
 import asyncio
 import inspect
-import os
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from functools import partial
-from typing import Any, Awaitable, Callable, Dict, Mapping, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Mapping, Sequence, Tuple, Union, cast
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import ValidationError
 
 from config.chains import RPC_ENV_VARS, get_chain_by_name
@@ -35,10 +35,10 @@ from core.routing.route_meta import (
     log_execution_comparison,
     log_route_expiry,
     log_route_validation,
-    resolve_route_chain_id,
-    route_meta_strictly_enforced,
-    route_meta_matches_node,
+    # route_meta_matches_node,
     route_meta_required,
+    # resolve_route_chain_id,
+    route_meta_strictly_enforced,
     validate_route_meta,
 )
 from core.security.guardrails import (
@@ -55,8 +55,8 @@ from core.utils.errors import (
     SlippageExceededError,
     categorize_error,
 )
-from core.utils.user_feedback import execution_failed
 from core.utils.evm_async import make_async_web3
+from core.utils.user_feedback import execution_failed
 from core.volume.tracker import track_execution_volume
 from graph.replay_guard import compute_execution_dedup_key, extract_client_dedup_fields
 from wallet_service.evm.get_native_bal import get_native_balance_async
@@ -125,8 +125,8 @@ def _trip_side_effect_cooldown(key: str, *, seconds: float) -> None:
     _side_effect_cooldowns[str(key)] = time.monotonic() + max(0.0, seconds)
 
 
-def _clear_route_fast_path(route_meta: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: v for k, v in route_meta.items() if k not in _ROUTE_FAST_PATH_KEYS}
+# def _clear_route_fast_path(route_meta: Dict[str, Any]) -> Dict[str, Any]:
+#     return {k: v for k, v in route_meta.items() if k not in _ROUTE_FAST_PATH_KEYS}
 
 
 def _find_unresolved_marker(value: Any, *, path: str = "args") -> str | None:
@@ -149,21 +149,21 @@ def _find_unresolved_marker(value: Any, *, path: str = "args") -> str | None:
     return None
 
 
-def _resolve_route_chain_id(chain_name: str) -> int | None:
-    return resolve_route_chain_id(chain_name)
+# def _resolve_route_chain_id(chain_name: str) -> int | None:
+#     return resolve_route_chain_id(chain_name)
 
 
-def _route_meta_matches_node(
-    *,
-    tool: str,
-    route_meta: Dict[str, Any],
-    resolved_args: Dict[str, Any],
-) -> bool:
-    return route_meta_matches_node(
-        tool=tool,
-        route_meta=route_meta,
-        resolved_args=resolved_args,
-    )
+# def _route_meta_matches_node(
+#     *,
+#     tool: str,
+#     route_meta: Dict[str, Any],
+#     resolved_args: Dict[str, Any],
+# ) -> bool:
+#     return route_meta_matches_node(
+#         tool=tool,
+#         route_meta=route_meta,
+#         resolved_args=resolved_args,
+#     )
 
 
 def _to_decimal(value: Any) -> Decimal | None:
@@ -244,7 +244,9 @@ def _normalize_confirmation_status(value: Any) -> str:
     return _TX_CONFIRMATION_UNKNOWN
 
 
-def _latest_human_message(messages: list[Any] | None) -> HumanMessage | None:
+def _latest_human_message(
+    messages: Sequence[BaseMessage] | None,
+) -> HumanMessage | None:
     if not messages:
         return None
     for message in reversed(messages):
@@ -322,7 +324,6 @@ class ExecutionRuntime:
             )
         guardrail = GuardrailService(guardrail_policy)
         ledger = get_ledger()
-        balance_snapshot: Dict[str, str] = state.get("balance_snapshot") or {}
         resource_snapshots: Dict[str, Dict[str, Any]] = (
             state.get("resource_snapshots") or {}
         )
@@ -602,7 +603,8 @@ class ExecutionRuntime:
             resource_keys = [
                 str(item.get("resource_key") or "").strip().lower()
                 for item in raw_requirements
-                if isinstance(item, dict) and str(item.get("resource_key") or "").strip()
+                if isinstance(item, dict)
+                and str(item.get("resource_key") or "").strip()
             ]
             reserved_totals = await service.get_reserved_totals(
                 wallet_scope=wallet_scope,
@@ -611,7 +613,9 @@ class ExecutionRuntime:
             for requirement in raw_requirements:
                 if not isinstance(requirement, dict):
                     return "Malformed reservation requirement blocked signing."
-                resource_key = str(requirement.get("resource_key") or "").strip().lower()
+                resource_key = (
+                    str(requirement.get("resource_key") or "").strip().lower()
+                )
                 required_base_units = max(
                     0,
                     int(requirement.get("required_base_units") or 0),
@@ -649,7 +653,9 @@ class ExecutionRuntime:
             resolved_args: Dict[str, Any],
             record: Any,
         ) -> tuple[bool, str]:
-            record_metadata = record.metadata if isinstance(record.metadata, dict) else {}
+            record_metadata = (
+                record.metadata if isinstance(record.metadata, dict) else {}
+            )
             age_seconds = max(
                 0.0,
                 (datetime.now(timezone.utc) - record.created_at).total_seconds(),
@@ -664,7 +670,9 @@ class ExecutionRuntime:
                     ),
                 )
 
-            sender = str(record_metadata.get("sender") or resolved_args.get("sender") or "").strip()
+            sender = str(
+                record_metadata.get("sender") or resolved_args.get("sender") or ""
+            ).strip()
             chain_name = str(
                 record_metadata.get("chain")
                 or resolved_args.get("chain")
@@ -679,11 +687,7 @@ class ExecutionRuntime:
                 for tx in pending
                 if isinstance(tx, dict)
                 and str(tx.get("sender") or "").strip().lower() == sender.lower()
-                and str(
-                    tx.get("chain")
-                    or tx.get("source_chain")
-                    or ""
-                ).strip().lower()
+                and str(tx.get("chain") or tx.get("source_chain") or "").strip().lower()
                 == chain_name.lower()
                 and str(tx.get("status") or "").strip().lower()
                 in {"pending", "pending_on_chain", "running"}
@@ -696,7 +700,9 @@ class ExecutionRuntime:
                 return True, "no_rpc_provider_for_reclaim_check"
             try:
                 w3 = make_async_web3(rpc_urls[0])
-                pending_nonce = int(await w3.eth.get_transaction_count(sender, "pending"))
+                pending_nonce = int(
+                    await w3.eth.get_transaction_count(sender, "pending")
+                )
                 latest_nonce = int(await w3.eth.get_transaction_count(sender, "latest"))
             except Exception as exc:
                 return True, f"nonce_probe_failed:{type(exc).__name__}"
@@ -1010,7 +1016,10 @@ class ExecutionRuntime:
             sync_method = getattr(store, "claim", None)
             if callable(sync_method):
                 try:
-                    return sync_method(key=key, metadata=metadata)
+                    return cast(
+                        tuple[Any, bool] | None,
+                        sync_method(key=key, metadata=metadata),
+                    )
                 except Exception:
                     return None
             return None
@@ -1200,8 +1209,12 @@ class ExecutionRuntime:
             if not callable(upsert_callable):
                 return
             if _callable_is_async(upsert_callable):
+
                 async def _upsert_and_cleanup() -> None:
-                    record = await upsert_callable(**upsert_kwargs)
+                    record_obj = await cast(
+                        Awaitable[Any], upsert_callable(**upsert_kwargs)
+                    )
+                    record = record_obj if isinstance(record_obj, dict) else None
                     schedule_terminal_task_cleanup(
                         task_record=record,
                         task_registry_cls=self._deps.task_registry_cls,
@@ -1216,7 +1229,8 @@ class ExecutionRuntime:
                 loop = asyncio.get_running_loop()
 
                 def _sync_upsert_and_cleanup() -> None:
-                    record = upsert_callable(**upsert_kwargs)
+                    record_obj = upsert_callable(**upsert_kwargs)
+                    record = record_obj if isinstance(record_obj, dict) else None
                     loop.call_soon_threadsafe(
                         lambda: schedule_terminal_task_cleanup(
                             task_record=record,
@@ -1548,12 +1562,13 @@ class ExecutionRuntime:
                                     record_scope_id is None
                                     or str(record_scope_id) == str(idempotency_scope)
                                 ):
-                                    uncertain, uncertainty_reason = (
-                                        await _evaluate_reclaim_uncertainty(
-                                            node=node,
-                                            resolved_args=resolved_args,
-                                            record=record,
-                                        )
+                                    (
+                                        uncertain,
+                                        uncertainty_reason,
+                                    ) = await _evaluate_reclaim_uncertainty(
+                                        node=node,
+                                        resolved_args=resolved_args,
+                                        record=record,
                                     )
                                     if uncertain:
                                         wait_reason = (
@@ -1585,7 +1600,10 @@ class ExecutionRuntime:
                                             chain_name=str(chain_name),
                                             tx_hash=str(tx_hash),
                                         )
-                                        if confirmation == _TX_CONFIRMATION_CONFIRMED_SUCCESS:
+                                        if (
+                                            confirmation
+                                            == _TX_CONFIRMATION_CONFIRMED_SUCCESS
+                                        ):
                                             result = {
                                                 "status": "success",
                                                 "tx_hash": tx_hash,
@@ -2111,7 +2129,7 @@ class ExecutionRuntime:
                     )
                     reasoning_logs.append(
                         f"[ROUTE] {node.id}: using planned "
-                        f"{route_meta.get('aggregator') or node.tool} route "
+                        f"{(route_meta or {}).get('aggregator') or node.tool} route "
                         f"(route_meta_used=true, age={age_seconds}s)"
                     )
                     execution_args = {
@@ -2411,7 +2429,7 @@ class ExecutionRuntime:
                         canonical_route_meta = canonical_route_meta_by_node_id.get(
                             node_id
                         )
-                        fallback_policy = fallback_policy_by_node_id.get(node_id)
+                        fallback_policy = fallback_policy_by_node_id[node_id]
 
                         if result.get("fallback_used"):
                             fallback_reason = (
@@ -2559,7 +2577,12 @@ class ExecutionRuntime:
                                 )
 
                         tx_hash = result.get("tx_hash")
-                        if tx_hash and node.tool in {"swap", "bridge", "transfer", "unwrap"}:
+                        if tx_hash and node.tool in {
+                            "swap",
+                            "bridge",
+                            "transfer",
+                            "unwrap",
+                        }:
                             await _mark_reservation_broadcast(
                                 node_id,
                                 tx_hash=str(tx_hash),
@@ -2688,7 +2711,10 @@ class ExecutionRuntime:
                         pending.append(tx_record)
 
                         quote = fee_map.get(node_id)
-                        if quote is not None and node.tool not in {"check_balance", "unwrap"}:
+                        if quote is not None and node.tool not in {
+                            "check_balance",
+                            "unwrap",
+                        }:
                             reasoning_logs.append(
                                 f"[FEE] Collecting fee for '{node_id}' …"
                             )

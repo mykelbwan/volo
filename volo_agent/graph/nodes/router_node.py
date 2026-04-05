@@ -2,9 +2,9 @@ import inspect
 import logging
 import re
 from datetime import datetime
-from typing import Any, Dict, cast
+from typing import Any, Dict, Sequence, cast
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from core.conversation.account_query_parser import parse_account_query
 from core.conversation.responder import (
@@ -157,7 +157,7 @@ def _has_pending_intent(state: AgentState) -> bool:
 
 def _should_continue_pending_intent(
     state: AgentState,
-    messages: list[Any] | None,
+    messages: Sequence[BaseMessage] | None,
     text: str,
 ) -> bool:
     if not _has_pending_intent(state):
@@ -187,7 +187,7 @@ def _should_continue_pending_intent(
     return isinstance(pending_clarification, dict) and bool(pending_clarification)
 
 
-def _latest_ai_text(messages: list[Any] | None) -> str:
+def _latest_ai_text(messages: Sequence[BaseMessage] | None) -> str:
     if not messages:
         return ""
     for message in reversed(messages):
@@ -196,7 +196,7 @@ def _latest_ai_text(messages: list[Any] | None) -> str:
     return ""
 
 
-def _latest_human_message(messages: list[Any] | None) -> HumanMessage | None:
+def _latest_human_message(messages: Sequence[BaseMessage] | None) -> HumanMessage | None:
     if not messages:
         return None
     for message in reversed(messages):
@@ -272,7 +272,9 @@ def _looks_like_transaction_clarification(text: str) -> bool:
     return any(keyword in normalized.split() for keyword in keywords)
 
 
-def _is_short_slot_fill_reply(messages: list[Any] | None, text: str) -> bool:
+def _is_short_slot_fill_reply(
+    messages: Sequence[BaseMessage] | None, text: str
+) -> bool:
     t = (text or "").strip().lower()
     if not t:
         return False

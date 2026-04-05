@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 _LOGGER = logging.getLogger("volo.replay_guard")
 _LOCK = threading.Lock()
@@ -165,7 +165,7 @@ def compute_execution_dedup_key(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def estimate_message_tokens(messages: Sequence[Any]) -> int:
+def estimate_message_tokens(messages: Sequence[BaseMessage]) -> int:
     chars = 0
     for msg in messages:
         chars += len(_content_str(getattr(msg, "content", "")))
@@ -176,9 +176,9 @@ def estimate_message_tokens(messages: Sequence[Any]) -> int:
 
 
 def select_messages_for_scope(
-    messages: Sequence[Any],
+    messages: Sequence[BaseMessage],
     scope: str | None,
-) -> Tuple[Sequence[Any], Sequence[Any], str | None]:
+) -> Tuple[Sequence[BaseMessage], Sequence[BaseMessage], str | None]:
     normalized_scope = normalize_parse_scope(scope)
     if not normalized_scope:
         return messages, [], None
@@ -267,7 +267,7 @@ def observe_replay_guard(
     *,
     replay_prevented: bool,
     parse_scope: str | None,
-    messages: Sequence[Any],
+    messages: Sequence[BaseMessage],
     reason: str,
 ) -> None:
     if replay_prevented:
@@ -297,7 +297,7 @@ def observe_history_retention(*, before_count: int, after_count: int) -> None:
 
 
 def build_rolling_summary_artifact(
-    older_messages: Sequence[Any],
+    older_messages: Sequence[BaseMessage],
     *,
     scope: str | None,
     max_items: int = 6,

@@ -1,37 +1,5 @@
-#!/usr/bin/env python
 """
-observer_service.py – Standalone entry point for the Volo Observer Watcher.
-
-Run this as a long-lived background process alongside (but independently of)
-the main bot / API server:
-
-    uv run python observer_service.py
-
-    # With custom poll interval:
-    uv run python observer_service.py --poll-interval 30
-
-The observer:
-  1. Connects to MongoDB (same instance as the main app).
-  2. Loads the compiled LangGraph app with MongoDBSaver so resumed threads
-     can read and write checkpoints.
-  3. Starts the PriceObserver (REST polling) and the evaluation
-     loop that checks pending triggers on every price tick.
-  4. When a trigger condition is satisfied, atomically marks it as triggered
-     and resumes the LangGraph thread via Command(resume=...).
-
-Graceful shutdown
------------------
-Send SIGINT (Ctrl+C) or SIGTERM to trigger a clean shutdown.  All in-flight
-resumes are allowed to complete (up to _RESUME_STREAM_TIMEOUT seconds) before
-the process exits.
-
-Logging
--------
-Set the LOG_LEVEL environment variable to control verbosity:
-
-    LOG_LEVEL=DEBUG uv run python observer_service.py
-
-Defaults to INFO.
+will resume working on this later
 """
 
 from __future__ import annotations

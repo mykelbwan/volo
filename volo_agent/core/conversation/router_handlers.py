@@ -131,8 +131,20 @@ def _format_wallet_address_response(
         )
 
     # Final fallback for unspecified or unknown chains
-    if evm_address:
-        return f"Your wallet address is {evm_address}."
+    evm_state_address = _get_state_address(state, "evm_address")
+    solana_state_address = _get_state_address(state, "solana_address")
+    resolved_evm = evm_state_address or evm_address
+
+    if resolved_evm and solana_state_address:
+        return (
+            "Your wallet addresses are:\n"
+            f"- EVM: {resolved_evm}\n"
+            f"- Solana: {solana_state_address}"
+        )
+    if resolved_evm:
+        return f"Your EVM address is {resolved_evm}."
+    if solana_state_address:
+        return f"Your Solana address is {solana_state_address}."
     return (
         "I couldn't find your wallet address yet. Please try again after "
         "onboarding completes."
