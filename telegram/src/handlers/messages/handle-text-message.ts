@@ -27,7 +27,8 @@ function responseMessage(response: AgentTurnResponse): string {
 export function createTextMessageHandler(deps: HandleTextMessageDeps) {
     return async (ctx: Context): Promise<void> => {
         const from = ctx.from;
-        const messageText = ctx.message && "text" in ctx.message ? ctx.message.text : undefined;
+        const messageText =
+            ctx.message && "text" in ctx.message ? ctx.message.text : undefined;
         if (!from || !messageText) {
             return;
         }
@@ -53,11 +54,12 @@ export function createTextMessageHandler(deps: HandleTextMessageDeps) {
             deps.sessionStore.updateFromResponse(userId, response);
             await sendTextReply(ctx, responseMessage(response));
         } catch (error) {
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail =
+                error instanceof Error ? error.message : String(error);
             console.error("telegram_turn_failed", detail);
             await sendTextReply(
                 ctx,
-                "I could not reach the Volo turn endpoint right now. Please retry.",
+                "Service is currently unavailable. Please try again later.",
             );
         }
     };

@@ -1,6 +1,6 @@
 import type { Context } from "grammy";
 
-const TELEGRAM_TEXT_LIMIT = 4000;
+const TELEGRAM_TEXT_LIMIT = 1000;
 
 function chunkText(text: string, maxLength: number): string[] {
     const normalized = text.trim();
