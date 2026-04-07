@@ -5,10 +5,10 @@
 Architecture docs
 
 docs/MPIE_ARCHITECTURE — conversational-level MPIE architecture, wait/resume flow, and security model.
-docs/DAG_ARCHITECTURE.md) — DAG planning, scheduling, mutation, and execution-state model.
-docs/DESIGN_PRINCIPLES.md) — project design principles and implementation constraints.
-docs/BRIDGE_STATUS_WORKER.md) — bridge status worker notes.
-docs/REV_GEN_PATHS.md) — revision generation path notes.
+docs/DAG_ARCHITECTURE — DAG planning, scheduling, mutation, and execution-state model.
+docs/DESIGN_PRINCIPLES — project design principles and implementation constraints.
+docs/BRIDGE_STATUS_WORKER — bridge status worker notes.
+docs/REV_GEN_PATHS — revision generation path notes.
 
 Admin scripts
 
