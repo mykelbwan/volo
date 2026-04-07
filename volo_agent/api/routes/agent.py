@@ -21,7 +21,7 @@ async def agent_turn(payload: AgentTurnRequest):
             status_code=mapping.status_code,
             content=build_error_response_body(
                 mapping=mapping,
-                message=str(exc) or None,
+                message=None,
                 details={"exception_type": exc.__class__.__name__},
             ),
         )
