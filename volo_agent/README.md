@@ -9,13 +9,3 @@ docs/DAG_ARCHITECTURE — DAG planning, scheduling, mutation, and execution-stat
 docs/DESIGN_PRINCIPLES — project design principles and implementation constraints.
 docs/BRIDGE_STATUS_WORKER — bridge status worker notes.
 docs/REV_GEN_PATHS — revision generation path notes.
-
-Admin scripts
-
-- `volo_agent/scripts/update_fee_table.py` — import and validate bridge fee tables (CSV/JSON) and optionally deploy them to `volo_agent/config/bridge_fee_table.json`.
-
-Usage:
-
-    python volo_agent/scripts/update_fee_table.py --input path/to/table.csv --deploy
-
-The script validates rows and writes a canonical JSON file suitable for the VWS FeeTable loader.
