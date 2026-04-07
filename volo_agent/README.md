@@ -4,11 +4,11 @@
 
 Architecture docs
 
-- [MPIE_ARCHITECTURE.md](/home/michael/dev-space/aura/volo_agent/docs/MPIE_ARCHITECTURE.md) — conversational-level MPIE architecture, wait/resume flow, and security model.
-- [DAG_ARCHITECTURE.md](/home/michael/dev-space/aura/volo_agent/docs/DAG_ARCHITECTURE.md) — DAG planning, scheduling, mutation, and execution-state model.
-- [DESIGN_PRINCIPLES.md](/home/michael/dev-space/aura/volo_agent/docs/DESIGN_PRINCIPLES.md) — project design principles and implementation constraints.
-- [BRIDGE_STATUS_WORKER.md](/home/michael/dev-space/aura/volo_agent/docs/BRIDGE_STATUS_WORKER.md) — bridge status worker notes.
-- [REV_GEN_PATHS.md](/home/michael/dev-space/aura/volo_agent/docs/REV_GEN_PATHS.md) — revision generation path notes.
+docs/MPIE_ARCHITECTURE — conversational-level MPIE architecture, wait/resume flow, and security model.
+docs/DAG_ARCHITECTURE.md) — DAG planning, scheduling, mutation, and execution-state model.
+docs/DESIGN_PRINCIPLES.md) — project design principles and implementation constraints.
+docs/BRIDGE_STATUS_WORKER.md) — bridge status worker notes.
+docs/REV_GEN_PATHS.md) — revision generation path notes.
 
 Admin scripts
 
