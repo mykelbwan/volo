@@ -1,45 +1,3 @@
-# volo_agent/core/planning/fee_table.py
-"""
-Fee table loader and lookup utilities for VWS (Virtual Wallet State).
-
-This module provides:
-- FeeRule dataclass: represents a single fee-rule entry.
-- FeeTable class: load from JSON/CSV, validate, lookup rules with precedence,
-  and compute estimated fees for a requested amount.
-- Simple CLI/self-test entrypoint when executed directly.
-
-Design notes
-------------
-- Fee matching precedence:
-    1) exact match: (protocol, src_chain, dst_chain, token)
-    2) protocol + pair, token-agnostic: (protocol, src_chain, dst_chain, token=None)
-    3) any-protocol but token-specific for pair: (protocol=None, src_chain, dst_chain, token)
-    4) pair-wide fallback: (protocol=None, src_chain, dst_chain, token=None)
-    5) global fallback is handled by FeeTable via defaults
-
-- No external dependencies are required (stdlib only). Validation is
-  performed with explicit checks and raises ValueError on invalid rules.
-
-Example JSON row:
-{
-  "protocol_id": "cbridge_v2",
-  "src_chain": "ethereum",
-  "dst_chain": "base",
-  "token": "USDC",                 # optional
-  "fee_type": "percent_plus_flat", # one of flat, percent, percent_plus_flat
-  "percent": 0.0012,               # optional depending on fee_type
-  "flat": 0.5,                     # optional depending on fee_type
-  "min_fee": 0.1,                  # optional
-  "max_fee": 50.0,                 # optional
-  "last_updated": "2026-03-01T12:00:00Z",
-  "notes": "based on operator docs"
-}
-
-This file also contains a small __main__-driven self-check that performs basic
-validations and demonstrates usage. It is not a replacement for repository
-unit tests but is useful for quick local sanity checks.
-"""
-
 from __future__ import annotations
 
 import csv
@@ -47,12 +5,9 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Dict, Iterable, Optional, Tuple, Union
 
-# Public constants / defaults
 ALLOWED_FEE_TYPES = {"flat", "percent", "percent_plus_flat"}
-
-# Conservative global fallback values used when no table entry is found.
 GLOBAL_DEFAULT_PERCENT = Decimal("0.01")  # 1% fallback for unknown bridges
 GLOBAL_DEFAULT_FLAT = Decimal("0")  # zero flat by default
 
@@ -79,11 +34,6 @@ class FeeRule:
     notes: Optional[str] = None
 
     def compute_fee(self, amount: Decimal) -> Decimal:
-        """
-        Compute the fee (in same token units as amount) for a given input amount.
-
-        Applies min/max clamps if present.
-        """
         if self.fee_type == "flat":
             fee = self.flat
         elif self.fee_type == "percent":
@@ -102,13 +52,6 @@ class FeeRule:
 
 
 class FeeTable:
-    """
-    In-memory fee table supporting load from JSON or CSV and read lookups.
-
-    Internally stores rules keyed by tuple (protocol_or_none, src_chain, dst_chain, token_or_none)
-    with normalized lowercased strings.
-    """
-
     def __init__(self, rules: Optional[Iterable[FeeRule]] = None) -> None:
         # Keyed map for fast lookup
         self._rules: Dict[Tuple[Optional[str], str, str, Optional[str]], FeeRule] = {}
@@ -143,9 +86,6 @@ class FeeTable:
         )
         self._rules[key] = rule
 
-    # ----------------------------
-    # Loading helpers
-    # ----------------------------
     @classmethod
     def from_json_file(cls, path: str) -> "FeeTable":
         with open(path, "r", encoding="utf-8") as fh:
@@ -166,7 +106,6 @@ class FeeTable:
 
     @classmethod
     def _rule_from_raw(cls, raw: dict, idx: int) -> FeeRule:
-        # Required fields: src_chain, dst_chain, fee_type, last_updated (optional)
         protocol = raw.get("protocol_id") or raw.get("protocol") or None
         src_chain = (
             raw.get("src_chain") or raw.get("source_chain") or raw.get("src") or ""
@@ -226,9 +165,6 @@ class FeeTable:
             notes=raw.get("notes"),
         )
 
-    # ----------------------------
-    # Lookup and compute
-    # ----------------------------
     def lookup_rule(
         self,
         src_chain: str,
@@ -236,10 +172,6 @@ class FeeTable:
         token: Optional[str] = None,
         protocol: Optional[str] = None,
     ) -> Optional[FeeRule]:
-        """
-        Lookup a fee rule with the precedence described above. Returns None
-        when no rule is found and callers should use global fallbacks.
-        """
         src = src_chain.strip().lower()
         dst = dst_chain.strip().lower()
         token_norm = self._normalize_optional_lower(token)
@@ -266,12 +198,6 @@ class FeeTable:
         token: Optional[str] = None,
         protocol: Optional[str] = None,
     ) -> Tuple[Decimal, Optional[FeeRule]]:
-        """
-        Estimate fee for `amount` bridging from src_chain -> dst_chain.
-
-        Returns (fee_amount, used_rule_or_None). If no rule found a conservative
-        fallback percent (GLOBAL_DEFAULT_PERCENT) is used and the fee_rule is None.
-        """
         if amount is None:
             raise ValueError("amount must be provided")
 

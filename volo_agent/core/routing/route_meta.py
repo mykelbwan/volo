@@ -508,15 +508,8 @@ def _legacy_bridge_route_supported(route_meta: Dict[str, Any]) -> bool:
     if aggregator == "lifi":
         tx_request = tool_data.get("transactionRequest")
         return isinstance(tx_request, Mapping) and bool(tx_request.get("data"))
-    if aggregator == "socket":
-        build_tx = tool_data.get("buildTxResult")
-        return (
-            isinstance(build_tx, Mapping)
-            and bool(build_tx.get("txData"))
-            and bool(build_tx.get("txTarget"))
-        )
     if aggregator == "mayan":
-        return bool(tool_data.get("quoteHash"))
+        return bool(tool_data.get("quoteId"))
     if aggregator in {"across", "relay"}:
         return isinstance(tool_data.get("planned_quote"), Mapping)
     return False

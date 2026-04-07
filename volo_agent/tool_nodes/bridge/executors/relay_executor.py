@@ -171,9 +171,6 @@ async def execute_relay_bridge(
     timeout: float = 120.0,
     status_timeout: float = _STATUS_TIMEOUT_SECONDS,
 ) -> RelayBridgeResult:
-    """
-    Execute Relay quote steps by signing and broadcasting each transaction.
-    """
     if not quote.steps:
         raise RuntimeError("Relay quote did not include executable steps.")
 

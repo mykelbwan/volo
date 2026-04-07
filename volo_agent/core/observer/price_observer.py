@@ -6,15 +6,13 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-import httpx
-
 from core.observer.price_keys import (
     key_for_chain_address,
     key_for_symbol,
     normalize_chain_name,
 )
 from core.token_security.dexscreener import get_dexscreener_slug_for_chain_name
-from core.utils.telemetry import record_external_call
+from core.utils.http import async_request_json
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +171,7 @@ class PriceCache:
 
 
 async def fetch_price_coingecko(
-    asset: str, client: httpx.AsyncClient
+    asset: str, _client: object | None = None
 ) -> Optional[float]:
     coin_id = COINGECKO_ID_MAP.get(asset.upper())
     if not coin_id:
@@ -181,54 +179,28 @@ async def fetch_price_coingecko(
         return None
 
     url = f"{_COINGECKO_REST_BASE}{_COINGECKO_SIMPLE_PRICE_ENDPOINT}"
-    start = time.perf_counter()
     try:
-        resp = await client.get(
+        resp = await async_request_json(
+            "GET",
             url,
             params={"ids": coin_id, "vs_currencies": "usd"},
             timeout=_REST_TIMEOUT_SECONDS,
-        )
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
             service="coingecko_rest",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=resp.status_code,
         )
-        resp.raise_for_status()
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logger.warning(
+                "CoinGecko REST HTTP error for %s: %s %s",
+                coin_id,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
         price = _safe_float((resp.json().get(coin_id) or {}).get("usd"))
         if price is None:
             raise ValueError("Missing or invalid price in CoinGecko response.")
         return price
-    except httpx.HTTPStatusError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="coingecko_rest",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=exc.response.status_code,
-            error=exc,
-        )
-        logger.warning(
-            "CoinGecko REST HTTP error for %s: %s %s",
-            coin_id,
-            exc.response.status_code,
-            exc.response.text[:200],
-        )
-    except httpx.RequestError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="coingecko_rest",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            error=exc,
-        )
+    except Exception as exc:
         logger.warning("CoinGecko REST request error for %s: %s", coin_id, exc)
-    except (KeyError, ValueError, TypeError) as exc:
-        logger.warning("CoinGecko REST parse error for %s: %s", coin_id, exc)
     return None
 
 
@@ -294,55 +266,29 @@ def _select_best_pair_by_liquidity(
 
 
 async def fetch_price_dexscreener(
-    asset: str, client: httpx.AsyncClient
+    asset: str, _client: object | None = None
 ) -> Optional[float]:
     symbol = asset.upper()
     url = f"{_DEXSCREENER_REST_BASE}{_DEXSCREENER_SEARCH_ENDPOINT}"
-    start = time.perf_counter()
     try:
-        resp = await client.get(
-            url, params={"q": symbol}, timeout=_REST_TIMEOUT_SECONDS
-        )
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
+        resp = await async_request_json(
+            "GET",
+            url,
+            params={"q": symbol},
+            timeout=_REST_TIMEOUT_SECONDS,
             service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=resp.status_code,
         )
-        resp.raise_for_status()
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logger.warning(
+                "Dexscreener HTTP error for %s: %s %s",
+                symbol,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
         data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=exc.response.status_code,
-            error=exc,
-        )
-        logger.warning(
-            "Dexscreener HTTP error for %s: %s %s",
-            symbol,
-            exc.response.status_code,
-            exc.response.text[:200],
-        )
-        return None
-    except httpx.RequestError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            error=exc,
-        )
+    except Exception as exc:
         logger.warning("Dexscreener request error for %s: %s", symbol, exc)
-        return None
-    except (ValueError, TypeError) as exc:
-        logger.warning("Dexscreener parse error for %s: %s", symbol, exc)
         return None
 
     pairs = data.get("pairs") or []
@@ -358,7 +304,7 @@ async def fetch_price_dexscreener(
 
 
 async def fetch_prices_dexscreener(
-    assets: list[str], client: httpx.AsyncClient
+    assets: list[str], client: object | None = None
 ) -> dict[str, float]:
     unique_assets = sorted({a.upper() for a in assets if a})
     if not unique_assets:
@@ -378,62 +324,32 @@ async def fetch_prices_dexscreener(
 
 
 async def fetch_price_dexscreener_token(
-    token: DexTokenRef, client: httpx.AsyncClient
+    token: DexTokenRef, _client: object | None = None
 ) -> Optional[float]:
     """
     Fetch the current USD price for a specific token address on a chain.
     """
     url = f"{_DEXSCREENER_REST_BASE}{_DEXSCREENER_TOKEN_PAIRS_ENDPOINT.format(chain=token.chain_slug, token=token.address)}"
-    start = time.perf_counter()
     try:
-        resp = await client.get(url, timeout=_REST_TIMEOUT_SECONDS)
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
+        resp = await async_request_json(
+            "GET",
+            url,
+            timeout=_REST_TIMEOUT_SECONDS,
             service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=resp.status_code,
         )
-        resp.raise_for_status()
+        if resp.status_code < 200 or resp.status_code >= 300:
+            logger.warning(
+                "Dexscreener HTTP error for %s on %s: %s %s",
+                token.symbol,
+                token.chain,
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
         data = resp.json()
-    except httpx.HTTPStatusError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=exc.response.status_code,
-            error=exc,
-        )
-        logger.warning(
-            "Dexscreener HTTP error for %s on %s: %s %s",
-            token.symbol,
-            token.chain,
-            exc.response.status_code,
-            exc.response.text[:200],
-        )
-        return None
-    except httpx.RequestError as exc:
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
-            service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            error=exc,
-        )
+    except Exception as exc:
         logger.warning(
             "Dexscreener request error for %s on %s: %s",
-            token.symbol,
-            token.chain,
-            exc,
-        )
-        return None
-    except (ValueError, TypeError) as exc:
-        logger.warning(
-            "Dexscreener parse error for %s on %s: %s",
             token.symbol,
             token.chain,
             exc,
@@ -458,7 +374,7 @@ async def fetch_price_dexscreener_token(
 
 
 async def fetch_prices_dexscreener_tokens(
-    tokens: list[DexTokenRef], client: httpx.AsyncClient
+    tokens: list[DexTokenRef], client: object | None = None
 ) -> dict[str, float]:
     """
     Fetch prices for multiple chain-address tokens via Dexscreener.
@@ -481,7 +397,7 @@ async def fetch_prices_dexscreener_tokens(
 
 async def fetch_prices_batch_coingecko(
     assets: list[str],
-    client: httpx.AsyncClient,
+    _client: object | None = None,
 ) -> dict[str, float]:
     ids: list[str] = []
     for asset in assets:
@@ -497,52 +413,24 @@ async def fetch_prices_batch_coingecko(
     results: dict[str, float] = {}
 
     for batch in _chunked(unique_ids, 200):
-        start = time.perf_counter()
         try:
-            resp = await client.get(
+            resp = await async_request_json(
+                "GET",
                 url,
                 params={"ids": ",".join(batch), "vs_currencies": "usd"},
                 timeout=_REST_TIMEOUT_SECONDS,
-            )
-            duration_ms = (time.perf_counter() - start) * 1000
-            record_external_call(
                 service="coingecko_rest",
-                method="GET",
-                url=url,
-                duration_ms=duration_ms,
-                status_code=resp.status_code,
             )
-            resp.raise_for_status()
+            if resp.status_code < 200 or resp.status_code >= 300:
+                logger.warning(
+                    "CoinGecko batch HTTP error: %s %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
+                continue
             data = resp.json()
-        except httpx.HTTPStatusError as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            record_external_call(
-                service="coingecko_rest",
-                method="GET",
-                url=url,
-                duration_ms=duration_ms,
-                status_code=exc.response.status_code,
-                error=exc,
-            )
-            logger.warning(
-                "CoinGecko batch HTTP error: %s %s",
-                exc.response.status_code,
-                exc.response.text[:200],
-            )
-            continue
-        except httpx.RequestError as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            record_external_call(
-                service="coingecko_rest",
-                method="GET",
-                url=url,
-                duration_ms=duration_ms,
-                error=exc,
-            )
+        except Exception as exc:
             logger.warning("CoinGecko batch request error: %s", exc)
-            continue
-        except (ValueError, TypeError) as exc:
-            logger.warning("CoinGecko batch parse error: %s", exc)
             continue
 
         if not isinstance(data, dict):
@@ -643,80 +531,71 @@ class PriceObserver:
             poll_interval,
             self.symbols,
         )
-        async with httpx.AsyncClient() as client:
-            while not self._stop_event.is_set():
-                try:
-                    prices: dict[str, float] = {}
+        while not self._stop_event.is_set():
+            try:
+                prices: dict[str, float] = {}
 
-                    async with self._symbol_lock:
-                        coingecko_symbols = list(self._coingecko_symbols)
-                        dex_symbols = list(self._dex_symbols)
+                async with self._symbol_lock:
+                    coingecko_symbols = list(self._coingecko_symbols)
+                    dex_symbols = list(self._dex_symbols)
 
-                    async with self._dex_lock:
-                        dex_tokens = list(self._dex_tokens.values())
+                async with self._dex_lock:
+                    dex_tokens = list(self._dex_tokens.values())
 
-                    if not coingecko_symbols and not dex_symbols and not dex_tokens:
-                        if not self._logged_empty_watchlist:
-                            logger.info("REST polling idle: no watched assets in DB.")
-                            self._logged_empty_watchlist = True
-                        try:
-                            await asyncio.wait_for(
-                                self._stop_event.wait(), timeout=poll_interval
-                            )
-                        except asyncio.TimeoutError:
-                            pass
-                        continue
-
-                    self._logged_empty_watchlist = False
-
-                    # 1) CoinGecko batch for supported assets
-                    if coingecko_symbols:
-                        coingecko_prices = await fetch_prices_batch_coingecko(
-                            coingecko_symbols, client
+                if not coingecko_symbols and not dex_symbols and not dex_tokens:
+                    if not self._logged_empty_watchlist:
+                        logger.info("REST polling idle: no watched assets in DB.")
+                        self._logged_empty_watchlist = True
+                    try:
+                        await asyncio.wait_for(
+                            self._stop_event.wait(), timeout=poll_interval
                         )
-                        prices.update(coingecko_prices)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
 
-                    # 2) Dexscreener search for non-CoinGecko assets
-                    if dex_symbols:
-                        dex_prices = await fetch_prices_dexscreener(dex_symbols, client)
-                        prices.update(dex_prices)
+                self._logged_empty_watchlist = False
 
-                    # 3) Dexscreener token address pricing (chain-aware)
-                    if dex_tokens:
-                        dex_token_prices = await fetch_prices_dexscreener_tokens(
-                            dex_tokens, client
-                        )
-                        prices.update(dex_token_prices)
-
-                    for asset, price in prices.items():
-                        await self.cache.set(asset, price)
-                        logger.debug("REST price update: %s = $%.4f", asset, price)
-
-                    if prices:
-                        logger.info(
-                            "REST tick: updated %d asset(s). Sample: %s",
-                            len(prices),
-                            ", ".join(
-                                f"{a}=${p:.2f}" for a, p in list(prices.items())[:4]
-                            ),
-                        )
-                    else:
-                        logger.warning(
-                            "REST tick: received empty price map from CoinGecko/Dexscreener"
-                        )
-                except asyncio.CancelledError:
-                    break
-                except Exception as exc:
-                    logger.error(
-                        "REST polling unexpected error: %s", exc, exc_info=True
+                # 1) CoinGecko batch for supported assets
+                if coingecko_symbols:
+                    coingecko_prices = await fetch_prices_batch_coingecko(
+                        coingecko_symbols
                     )
+                    prices.update(coingecko_prices)
 
-                try:
-                    await asyncio.wait_for(
-                        self._stop_event.wait(), timeout=poll_interval
+                # 2) Dexscreener search for non-CoinGecko assets
+                if dex_symbols:
+                    dex_prices = await fetch_prices_dexscreener(dex_symbols)
+                    prices.update(dex_prices)
+
+                # 3) Dexscreener token address pricing (chain-aware)
+                if dex_tokens:
+                    dex_token_prices = await fetch_prices_dexscreener_tokens(dex_tokens)
+                    prices.update(dex_token_prices)
+
+                for asset, price in prices.items():
+                    await self.cache.set(asset, price)
+                    logger.debug("REST price update: %s = $%.4f", asset, price)
+
+                if prices:
+                    logger.info(
+                        "REST tick: updated %d asset(s). Sample: %s",
+                        len(prices),
+                        ", ".join(f"{a}=${p:.2f}" for a, p in list(prices.items())[:4]),
                     )
-                except asyncio.TimeoutError:
-                    pass  # Normal — timeout just means it's time for the next tick
+                else:
+                    logger.warning(
+                        "REST tick: received empty price map from CoinGecko/Dexscreener"
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("REST polling unexpected error: %s", exc, exc_info=True)
+
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=poll_interval)
+            except asyncio.TimeoutError:
+                pass  # Normal — timeout just means it's time for the next tick
 
         logger.info("PriceObserver REST polling stopped.")
 

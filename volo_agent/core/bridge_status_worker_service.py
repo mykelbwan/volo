@@ -1,5 +1,3 @@
-"""Core bridge status worker service used by API hosts and CLI wrappers."""
-
 from __future__ import annotations
 
 import asyncio
@@ -390,40 +388,6 @@ def _normalize_lifi_meta(
     return updated
 
 
-def _normalize_socket_meta(
-    meta: Dict[str, Any], pending: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Ensure Socket status polling has fromChainId/toChainId.
-    Socket requires both chain IDs for /v2/bridge-status.
-    """
-    updated = dict(meta)
-
-    if updated.get("fromChainId") is None:
-        if updated.get("fromChain") is not None:
-            updated["fromChainId"] = _coerce_int(updated.get("fromChain"))
-        elif pending.get("source_chain_id") is not None:
-            updated["fromChainId"] = _coerce_int(pending.get("source_chain_id"))
-        else:
-            src = pending.get("source_chain") or pending.get("chain")
-            cid = _infer_chain_id(src)
-            if cid is not None:
-                updated["fromChainId"] = cid
-
-    if updated.get("toChainId") is None:
-        if updated.get("toChain") is not None:
-            updated["toChainId"] = _coerce_int(updated.get("toChain"))
-        elif pending.get("dest_chain_id") is not None:
-            updated["toChainId"] = _coerce_int(pending.get("dest_chain_id"))
-        else:
-            dst = pending.get("dest_chain")
-            cid = _infer_chain_id(dst)
-            if cid is not None:
-                updated["toChainId"] = cid
-
-    return updated
-
-
 def _normalize_tx_hash(tx_hash: str) -> str:
     h = (tx_hash or "").strip()
     if not h:
@@ -738,7 +702,6 @@ async def _process_pending_records(
             infer_across_deposit_meta=_infer_across_deposit_meta,
             infer_is_testnet=_infer_is_testnet,
             normalize_lifi_meta=_normalize_lifi_meta,
-            normalize_socket_meta=_normalize_socket_meta,
             normalize_pending=_normalize_pending,
             normalize_tx_hash=_normalize_tx_hash,
             apply_status_update=_apply_status_update,

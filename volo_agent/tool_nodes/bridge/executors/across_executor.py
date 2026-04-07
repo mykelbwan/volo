@@ -8,7 +8,6 @@ from decimal import Decimal
 from web3 import Web3
 
 from config.abi import ACROSS_SPOKE_POOL_ABI, ERC20_ABI
-from config.bridge_registry import ACROSS
 from config.chains import get_chain_by_id
 from core.utils.evm_async import (
     async_await_evm_receipt,
@@ -33,42 +32,18 @@ from wallet_service.evm.nonce_manager import (
 )
 from wallet_service.evm.sign_tx import sign_transaction_async
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# Max uint256 — used for ERC-20 approvals so the user only approves once
-# per token/SpokePool pair.
 _MAX_UINT256 = 2**256 - 1
-
-# Zero address — used for native token deposits (ETH, MATIC, etc.)
 _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-
-# Gas ceiling for a depositV3 call. The actual gas used is typically
-# ~100k–150k but we add a comfortable buffer.
 _DEPOSIT_GAS_LIMIT = 300_000
-
-# Gas ceiling for an ERC-20 approve call.
 _APPROVE_GAS_LIMIT = 100_000
-
-# Across API endpoints
 _STATUS_ENDPOINT = "/deposit/status"
 _STATUS_POLL_INTERVAL_SECONDS = 6.0
 _STATUS_TIMEOUT_SECONDS = 300.0
-
-# Across quotes must be fresh (quoteTimestamp should be close to current time).
 _MAX_QUOTE_AGE_SECONDS = 600
 _MAX_QUOTE_FUTURE_SKEW_SECONDS = 60
 
 _ACROSS_SUCCESS_STATUSES = {"filled"}
 _ACROSS_FAILURE_STATUSES = {"expired", "refunded"}
-
-
-def _across_api_base_url(is_testnet: bool) -> str:
-    if is_testnet:
-        return "https://testnet.across.to/api"
-    return ACROSS.api_base_url
-
 
 async def _fetch_deposit_status(api_base_url: str, deposit_tx_hash: str) -> dict:
     response = await async_request_json(
@@ -107,12 +82,6 @@ async def _poll_deposit_status(
 
     return last_payload
 
-
-# ---------------------------------------------------------------------------
-# Result dataclass
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class AcrossBridgeResult:
     tx_hash: str
@@ -144,9 +113,6 @@ def _build_approve_tx(
     max_priority_fee_per_gas: int,
     chain_id: int,
 ) -> dict:
-    """
-    Build an unsigned ERC-20 approve(spender, MAX_UINT256) transaction dict.
-    """
     contract = w3.eth.contract(
         address=w3.to_checksum_address(token_address),
         abi=ERC20_ABI,
@@ -170,9 +136,6 @@ def _build_approve_tx(
 
 
 def _coerce_tx_numeric_fields(tx: dict) -> dict:
-    """
-    Normalize hex-encoded numeric fields to ints for signing.
-    """
     normalized = dict(tx)
     for key in (
         "gas",

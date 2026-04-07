@@ -13,11 +13,6 @@ except Exception:  # pragma: no cover - optional dependency
     _UpstashRedisType = None  # type: ignore[assignment]
 
 _UPSTASH_CLIENT: Optional[Any] = None
-
-# Lazily initialised inside a running event loop so the underlying
-# httpx.AsyncClient is always created with a live loop available.
-# Double-checked locking prevents duplicate construction under concurrency.
-
 _ASYNC_CLIENT: Optional[Any] = None
 _ASYNC_LOCK: Optional[asyncio.Lock] = None
 

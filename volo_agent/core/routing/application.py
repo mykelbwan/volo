@@ -220,8 +220,8 @@ def log_decision(
 
 def log_fallback(node_id: str, reason: str) -> str:
     return (
-        f"[ROUTE] {node_id}: no quotes from any source ({reason}) — "
-        "execution will fail fast until a fresh route is planned"
+        f"[ROUTE] {node_id}: route planner could not produce a quote ({reason}). "
+        "Execution will continue with runtime fallback routing."
     )
 
 

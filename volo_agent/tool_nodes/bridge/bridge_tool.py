@@ -17,7 +17,11 @@ from config.bridge_registry import (
     relay_api_base_url,
 )
 from config.chains import get_chain_by_name
-from config.solana_chains import get_solana_chain, is_solana_network
+from config.solana_chains import (
+    get_solana_chain,
+    is_solana_chain_id,
+    is_solana_network,
+)
 from core.routing.models import BridgeRouteQuote
 from core.routing.route_meta import coerce_fallback_policy, enforce_fallback_policy
 from core.token_security.registry_lookup import (
@@ -67,11 +71,6 @@ SimulationResult = (
     AcrossBridgeQuote | RelayBridgeQuote | AcrossSimulationError | RelaySimulationError
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _get_env_float(key: str, default: float) -> float:
     raw = str(os.getenv(key, "")).strip()
     if not raw:
@@ -96,7 +95,6 @@ _BRIDGE_SIMULATION_SEMAPHORES: WeakKeyDictionary[
 _EXECUTE_ACROSS_BRIDGE_FN: Any | None = None
 _EXECUTE_MAYAN_BRIDGE_FN: Any | None = None
 _EXECUTE_LIFI_BRIDGE_FN: Any | None = None
-_EXECUTE_SOCKET_BRIDGE_FN: Any | None = None
 _EXECUTE_RELAY_BRIDGE_FN: Any | None = None
 _MAYAN_AGGREGATOR: Any | None = None
 
@@ -132,17 +130,6 @@ async def execute_lifi_bridge(*args: Any, **kwargs: Any) -> Any:
 
         _EXECUTE_LIFI_BRIDGE_FN = _execute_lifi_bridge_impl
     return await _EXECUTE_LIFI_BRIDGE_FN(*args, **kwargs)
-
-
-async def execute_socket_bridge(*args: Any, **kwargs: Any) -> Any:
-    global _EXECUTE_SOCKET_BRIDGE_FN
-    if _EXECUTE_SOCKET_BRIDGE_FN is None:
-        from tool_nodes.bridge.executors.socket_executor import (
-            execute_socket_bridge as _execute_socket_bridge_impl,
-        )
-
-        _EXECUTE_SOCKET_BRIDGE_FN = _execute_socket_bridge_impl
-    return await _EXECUTE_SOCKET_BRIDGE_FN(*args, **kwargs)
 
 
 async def execute_relay_bridge(*args: Any, **kwargs: Any) -> Any:
@@ -299,12 +286,49 @@ def _validate_non_executable_bridge_route_meta(
     planned_quote = (
         tool_data.get("planned_quote") if isinstance(tool_data, dict) else None
     )
-    if _route_meta_contains_untrusted_bridge_tx(route_meta):
+    if aggregator != "lifi" and _route_meta_contains_untrusted_bridge_tx(route_meta):
         _LOGGER.warning(
             "route_meta_rejected reason=untrusted_precomputed_tx aggregator=%s",
             aggregator or "unknown",
         )
         raise NonRetryableError("Untrusted precomputed transaction data is not allowed")
+    if aggregator == "lifi":
+        tx_request = tool_data.get("transactionRequest") if isinstance(tool_data, dict) else None
+        if not isinstance(tx_request, dict) or not tx_request.get("data"):
+            raise NonRetryableError(
+                format_with_recovery(
+                    "The planned LiFi route is missing transaction data",
+                    "request a fresh route and retry",
+                )
+            )
+        chain_id_raw = tx_request.get("chainId")
+        if chain_id_raw not in (None, ""):
+            tx_chain_id: int | None = None
+            raw_text = str(chain_id_raw).strip()
+            try:
+                tx_chain_id = int(raw_text, 0)
+            except ValueError:
+                try:
+                    tx_chain_id = int(raw_text)
+                except ValueError:
+                    tx_chain_id = None
+            if tx_chain_id is None or tx_chain_id != int(source_chain_id):
+                raise NonRetryableError(
+                    format_with_recovery(
+                        "The planned LiFi route targets a different source chain",
+                        "request a fresh route and retry",
+                    )
+                )
+        is_solana_route = is_solana_chain_id(source_chain_id) or is_solana_chain_id(
+            dest_chain_id
+        )
+        if not is_solana_route and not tx_request.get("to"):
+            raise NonRetryableError(
+                format_with_recovery(
+                    "The planned LiFi route is missing a destination contract",
+                    "request a fresh route and retry",
+                )
+            )
     if str(route_meta.get("token_symbol") or "").strip().upper() not in {
         "",
         token_symbol,
@@ -474,7 +498,7 @@ async def _get_route_decimals(route: BridgeRoute, token_symbol: str) -> tuple[in
             )
 
     if input_decimals is None or output_decimals is None:
-        logger.error(
+        _LOGGER.error(
             "bridge_tool: could not resolve decimals for %s. input=%s, output=%s",
             symbol,
             input_decimals,
@@ -589,7 +613,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
     sender = str(sender).strip()
     recipient = str(recipient).strip()
 
-    # ── 2. Resolve chain IDs ──────────────────────────────────────────────────
     # Solana is not in the EVM chain registry — handle it separately.
     source_chain = None
     dest_chain = None
@@ -691,6 +714,96 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(route_meta, dict) and route_meta:
         planned_quote = _bridge_quote_from_route_meta(route_meta)
         aggregator = str(route_meta.get("aggregator") or "").strip().lower()
+        if aggregator == "lifi":
+            output_amount = safe_decimal(route_meta.get("output_amount")) or Decimal("0")
+            if output_amount <= 0:
+                output_amount = amount
+            try:
+                if source_is_solana:
+                    lifi_result = await execute_lifi_bridge(
+                        route_meta=route_meta,
+                        token_symbol=token_symbol,
+                        source_chain_id=source_chain_id,
+                        dest_chain_id=dest_chain_id,
+                        source_chain_name=source_chain_display,
+                        dest_chain_name=dest_chain_display,
+                        input_amount=amount,
+                        output_amount=output_amount,
+                        sub_org_id=sub_org_id,
+                        sender=sender,
+                        recipient=recipient,
+                        solana_network=str(source_chain_name).strip().lower(),
+                    )
+                else:
+                    async with wallet_lock(sender, source_chain_id):
+                        lifi_result = await execute_lifi_bridge(
+                            route_meta=route_meta,
+                            token_symbol=token_symbol,
+                            source_chain_id=source_chain_id,
+                            dest_chain_id=dest_chain_id,
+                            source_chain_name=source_chain_display,
+                            dest_chain_name=dest_chain_display,
+                            input_amount=amount,
+                            output_amount=output_amount,
+                            sub_org_id=sub_org_id,
+                            sender=sender,
+                            recipient=recipient,
+                        )
+            except NonRetryableError:
+                raise
+            except Exception as exc:
+                await mark_transfer_failed(claim, error=str(exc))
+                raise RuntimeError(
+                    format_with_recovery(
+                        "The selected LiFi route could not be executed",
+                        "retry in a moment or request a fresh quote",
+                    )
+                ) from exc
+
+            fill_time = format_fill_time(_safe_int(route_meta.get("fill_time_seconds"), 0))
+            msg = (
+                f"Bridge started: {lifi_result.input_amount} {lifi_result.token_symbol}. "
+                f"From {lifi_result.source_chain_name} to {lifi_result.dest_chain_name}. "
+                f"Estimated time: {fill_time}. "
+                f"Tracking ID: {lifi_result.tx_hash}."
+            )
+            response = {
+                "status": "pending",
+                "tx_hash": lifi_result.tx_hash,
+                "approve_hash": lifi_result.approve_hash,
+                "protocol": "lifi",
+                "token_symbol": lifi_result.token_symbol,
+                "input_amount": str(lifi_result.input_amount),
+                "output_amount": str(lifi_result.output_amount),
+                "total_fee": str(safe_decimal(route_meta.get("total_fee")) or Decimal("0")),
+                "total_fee_pct": str(
+                    safe_decimal(route_meta.get("total_fee_pct")) or Decimal("0")
+                ),
+                "source_chain": lifi_result.source_chain_name,
+                "dest_chain": lifi_result.dest_chain_name,
+                "recipient": lifi_result.recipient,
+                "estimated_fill_time": fill_time,
+                "bridge_status": lifi_result.status,
+                "fallback_used": False,
+                "fallback_reason": None,
+                "route_meta_used": True,
+                "request_id": request_id,
+                "message": msg,
+            }
+            if lifi_result.nonce is not None:
+                response["nonce"] = lifi_result.nonce
+            if lifi_result.raw_tx:
+                response["raw_tx"] = lifi_result.raw_tx
+            if lifi_result.tx_payload:
+                response["tx_payload"] = lifi_result.tx_payload
+            if lifi_result.bridge:
+                response["bridge"] = lifi_result.bridge
+            if lifi_result.from_chain_id is not None:
+                response["from_chain_id"] = lifi_result.from_chain_id
+            if lifi_result.to_chain_id is not None:
+                response["to_chain_id"] = lifi_result.to_chain_id
+            return await _store_bridge_response(response)
+
         if aggregator == "mayan" and planned_quote is not None:
             try:
                 if source_is_solana:
@@ -853,7 +966,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 )
             )
 
-    # ── 3. Look up supported routes in the bridge registry ───────────────────
     # Across / Relay are EVM-only — skip them for Solana routes.
     routes = []
     dynamic_route_tuples: list[tuple[BridgeProtocolConfig, BridgeRoute]] = []
@@ -884,7 +996,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         [] if source_is_solana or dest_is_solana else get_dynamic_protocols()
     )
 
-    # ── 4. Simulate all routes in parallel ───────────────────────────────────
     simulation_tasks: list[asyncio.Task[Any]] = []
     route_decimals = await asyncio.gather(
         *[_get_route_decimals(route_tuple[1], token_symbol) for route_tuple in routes]
@@ -975,7 +1086,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         )
     simulation_results = await asyncio.gather(*simulation_tasks, return_exceptions=True)
 
-    # ── 5. Collect EVM quotes ─────────────────────────────────────────────────
     quotes: list[AcrossBridgeQuote | RelayBridgeQuote] = []
     simulation_errors: list[str] = []
 
@@ -1000,7 +1110,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
             quotes.append(sim_result)
 
-    # ── 5b. Fetch Mayan quote for Solana routes ───────────────────────────────
     mayan_quote: Any | None = None
     if source_is_solana or dest_is_solana:
         try:
@@ -1022,6 +1131,10 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                     mayan_quote.total_fee_pct,
                     mayan_quote.estimated_fill_time_seconds,
                 )
+            else:
+                mayan_reason = str(getattr(_mayan_agg, "last_error", "") or "").strip()
+                if mayan_reason:
+                    simulation_errors.append(f"[mayan] {mayan_reason}")
         except Exception as exc:
             simulation_errors.append(f"[mayan] {exc}")
             _LOGGER.warning("mayan quote failed: %s", exc)
@@ -1044,7 +1157,6 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
         )
 
-    # ── 6. Execute via matching executor with deterministic fallback ─────────
     # For Solana routes: Mayan is the only executor.
     # For EVM routes: prefer Across, fall back to Relay.
     if mayan_quote:

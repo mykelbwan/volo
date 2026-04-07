@@ -6,8 +6,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Awaitable, Optional, Protocol, cast
 
-import httpx
-
 from config.chains import get_chain_by_name
 from config.solana_chains import get_solana_chain
 from core.database.mongodb_async import AsyncMongoDB
@@ -23,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 _COLLECTION = "volume_aggregates"
 _DEFAULT_FLUSH_INTERVAL_SECONDS = 5 * 60  # 5 minutes
-_PRICE_HTTP_TIMEOUT = 10.0
 
 
 class _RedisPipelineLike(Protocol):
@@ -137,12 +134,10 @@ async def _atomic_getdel(redis: object, key: str) -> object | None:
 async def _resolve_prices(
     tokens: set[str],
     watcher: VolumeWatcherAccess,
-    http_client: httpx.AsyncClient,
 ) -> dict[str, float]:
     return await resolve_prices(
         tokens,
         price_cache=watcher.price_cache,
-        http_client=http_client,
     )
 
 
@@ -171,8 +166,7 @@ async def _flush_once(redis: object, watcher: VolumeWatcherAccess) -> int:
     #  Resolve prices in one batch pass
     prices: dict[str, float] = {}
     if mainnet_tokens:
-        async with httpx.AsyncClient(timeout=_PRICE_HTTP_TIMEOUT) as http_client:
-            prices = await _resolve_prices(mainnet_tokens, watcher, http_client)
+        prices = await _resolve_prices(mainnet_tokens, watcher)
 
     #  Per-key: GETDEL → MongoDB upsert
     col = AsyncMongoDB.get_collection(_COLLECTION)

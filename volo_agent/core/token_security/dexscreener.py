@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import logging
-import random
-import time
 from typing import Any, Optional
 
-import requests
-from requests import HTTPError, RequestException, Response
+from requests import HTTPError, RequestException
 
 from config.chains import CHAINS, find_chain_by_id, find_chain_by_name
 from config.solana_chains import (
@@ -17,7 +14,7 @@ from config.solana_chains import (
     is_solana_network,
 )
 from core.token_security.models import DexscreenerCandidate
-from core.utils.telemetry import record_external_call
+from core.utils.http import request_json
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +22,6 @@ _BASE_URL = "https://api.dexscreener.com"
 _SEARCH_ENDPOINT = "/latest/dex/search"
 
 _DEFAULT_TIMEOUT_SECONDS: float = 10.0
-_MAX_RETRIES: int = 4
-_BASE_BACKOFF_SECONDS: float = 1.0
-_MAX_BACKOFF_SECONDS: float = 16.0
 
 _DEFAULT_MAX_CANDIDATES: int = 3
 
@@ -97,16 +91,6 @@ class DexscreenerUnavailableError(DexscreenerError):
     """Raised after all retries are exhausted due to server errors (5xx)."""
 
 
-def _should_retry(response: Response) -> bool:
-    """Return True for responses that warrant an automatic retry."""
-    return response.status_code == 429 or response.status_code >= 500
-
-
-def _backoff_delay(attempt: int) -> float:
-    cap = min(_MAX_BACKOFF_SECONDS, _BASE_BACKOFF_SECONDS * (2**attempt))
-    return random.uniform(0, cap)
-
-
 def _is_testnet_chain(chain_id: int, chain_name: str) -> bool:
     try:
         if is_solana_chain_id(chain_id):
@@ -129,87 +113,45 @@ def _get_with_retry(
     params: dict,
     timeout: float = _DEFAULT_TIMEOUT_SECONDS,
 ) -> dict:
-    last_exc: Optional[Exception] = None
-    last_status: Optional[int] = None
-
-    for attempt in range(_MAX_RETRIES):
-        start = time.perf_counter()
-        try:
-            resp = requests.get(url, params=params, timeout=timeout)
-        except RequestException as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            record_external_call(
-                service="dexscreener",
-                method="GET",
-                url=url,
-                duration_ms=duration_ms,
-                error=exc,
-            )
-            # Network / DNS / timeout error — retry with backoff
-            last_exc = exc
-            delay = _backoff_delay(attempt)
-            logger.warning(
-                "Dexscreener network error (attempt %d/%d): %s. Retrying in %.1fs.",
-                attempt + 1,
-                _MAX_RETRIES,
-                exc,
-                delay,
-            )
-            time.sleep(delay)
-            continue
-
-        last_status = resp.status_code
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
+    try:
+        resp = request_json(
+            "GET",
+            url,
+            params=params,
+            timeout=timeout,
             service="dexscreener",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=resp.status_code,
         )
+    except RequestException as exc:
+        raise DexscreenerError(
+            f"Dexscreener request failed due to network error: {exc}"
+        ) from exc
 
-        if resp.status_code == 200:
-            try:
-                return resp.json()
-            except ValueError as exc:
-                raise DexscreenerError(
-                    f"Dexscreener returned non-JSON response: {resp.text[:200]}"
-                ) from exc
-
-        if _should_retry(resp):
-            delay = _backoff_delay(attempt)
-            logger.warning(
-                "Dexscreener HTTP %d (attempt %d/%d). Retrying in %.1fs.",
-                resp.status_code,
-                attempt + 1,
-                _MAX_RETRIES,
-                delay,
-            )
-            time.sleep(delay)
-            continue
-
-        # Non-retryable error (e.g. 400, 404)
+    if resp.status_code == 200:
         try:
-            resp.raise_for_status()
-        except HTTPError as exc:
+            return resp.json()
+        except ValueError as exc:
             raise DexscreenerError(
-                f"Dexscreener non-retryable HTTP {resp.status_code}: {resp.text[:200]}"
+                f"Dexscreener returned non-JSON response: {resp.text[:200]}"
             ) from exc
 
-    # All retries exhausted
-    if last_status == 429:
+    # request_json already retries transient 429/5xx statuses.
+    if resp.status_code == 429:
         raise DexscreenerRateLimitError(
-            f"Dexscreener rate limit hit after {_MAX_RETRIES} attempts."
+            "Dexscreener rate limit hit after shared retry attempts."
         )
-    if last_status is not None and last_status >= 500:
+    if resp.status_code >= 500:
         raise DexscreenerUnavailableError(
-            f"Dexscreener unavailable (HTTP {last_status}) after {_MAX_RETRIES} attempts."
+            f"Dexscreener unavailable (HTTP {resp.status_code}) after shared retry attempts."
         )
 
-    raise DexscreenerError(
-        f"Dexscreener request failed after {_MAX_RETRIES} attempts. "
-        f"Last error: {last_exc}"
-    )
+    try:
+        resp.raise_for_status()
+    except HTTPError as exc:
+        raise DexscreenerError(
+            f"Dexscreener non-retryable HTTP {resp.status_code}: {resp.text[:200]}"
+        ) from exc
+
+    raise DexscreenerError("Dexscreener request failed unexpectedly.")
 
 
 def _parse_pairs(

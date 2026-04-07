@@ -1,7 +1,3 @@
-"""
-Helpers for building explorer links from tx hashes.
-"""
-
 from __future__ import annotations
 
 from typing import Optional

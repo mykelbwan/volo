@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
-import httpx
-
 from core.observer.price_observer import (
     COINGECKO_ID_MAP,
     PriceCache,
@@ -25,7 +23,6 @@ async def resolve_prices(
     tokens: set[str],
     *,
     price_cache: PriceCache,
-    http_client: httpx.AsyncClient,
 ) -> dict[str, float]:
     if not tokens:
         return {}
@@ -47,7 +44,7 @@ async def resolve_prices(
 
     if cg_tokens:
         try:
-            cg_prices = await fetch_prices_batch_coingecko(cg_tokens, http_client)
+            cg_prices = await fetch_prices_batch_coingecko(cg_tokens)
             prices.update(cg_prices)
             remaining -= set(cg_prices.keys())
         except Exception as exc:
@@ -55,7 +52,7 @@ async def resolve_prices(
 
     if remaining:
         try:
-            dex_prices = await fetch_prices_dexscreener(list(remaining), http_client)
+            dex_prices = await fetch_prices_dexscreener(list(remaining))
             prices.update(dex_prices)
         except Exception as exc:
             logger.warning("[VOLUME FLUSH] Dexscreener batch error: %s", exc)

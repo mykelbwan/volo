@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import requests
-from requests import HTTPError, RequestException, Response
+from requests import HTTPError, RequestException
 
 from config.chains import CHAINS
 from config.solana_chains import SOLANA_CHAINS
@@ -19,16 +16,13 @@ from core.token_security.models import (
     SecurityFlag,
     SecurityTier,
 )
-from core.utils.telemetry import record_external_call
+from core.utils.http import request_json
 
 logger = logging.getLogger(__name__)
 _BASE_URL = "https://api.gopluslabs.io"
 _TOKEN_SECURITY_ENDPOINT = "/api/v1/token_security/{chain_id}"
 
 _DEFAULT_TIMEOUT_SECONDS: float = 12.0
-_MAX_RETRIES: int = 4
-_BASE_BACKOFF_SECONDS: float = 1.0
-_MAX_BACKOFF_SECONDS: float = 16.0
 
 # Maximum number of addresses to include in a single API call.
 # GoPlus supports up to 100; we cap at 10 to stay well within any limits.
@@ -111,101 +105,48 @@ class GoplusChainNotSupportedError(GoplusError):
     """Raised when a chain_id is not in ``GOPLUS_SUPPORTED_CHAIN_IDS``."""
 
 
-def _should_retry(response: Response) -> bool:
-    """Return True for transient HTTP error codes that warrant a retry."""
-    return response.status_code == 429 or response.status_code >= 500
-
-
-def _backoff_delay(attempt: int) -> float:
-    cap = min(_MAX_BACKOFF_SECONDS, _BASE_BACKOFF_SECONDS * (2**attempt))
-    return random.uniform(0, cap)
-
-
 def _get_with_retry(
     url: str,
     params: dict,
     headers: dict,
     timeout: float,
 ) -> dict:
-    last_status: Optional[int] = None
-    last_exc: Optional[Exception] = None
-
-    for attempt in range(_MAX_RETRIES):
-        start = time.perf_counter()
-        try:
-            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
-        except RequestException as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            record_external_call(
-                service="goplus",
-                method="GET",
-                url=url,
-                duration_ms=duration_ms,
-                error=exc,
-            )
-            last_exc = exc
-            delay = _backoff_delay(attempt)
-            logger.warning(
-                "GoPlus network error (attempt %d/%d): %s. Retrying in %.1fs.",
-                attempt + 1,
-                _MAX_RETRIES,
-                exc,
-                delay,
-            )
-            time.sleep(delay)
-            continue
-
-        last_status = resp.status_code
-        duration_ms = (time.perf_counter() - start) * 1000
-        record_external_call(
+    try:
+        resp = request_json(
+            "GET",
+            url,
+            params=params,
+            headers=headers,
+            timeout=timeout,
             service="goplus",
-            method="GET",
-            url=url,
-            duration_ms=duration_ms,
-            status_code=resp.status_code,
         )
+    except RequestException as exc:
+        raise GoplusError(f"GoPlus request failed due to network error: {exc}") from exc
 
-        if resp.status_code == 200:
-            try:
-                return resp.json()
-            except ValueError as exc:
-                raise GoplusError(
-                    f"GoPlus returned non-JSON response: {resp.text[:200]}"
-                ) from exc
-
-        if _should_retry(resp):
-            delay = _backoff_delay(attempt)
-            logger.warning(
-                "GoPlus HTTP %d (attempt %d/%d). Retrying in %.1fs.",
-                resp.status_code,
-                attempt + 1,
-                _MAX_RETRIES,
-                delay,
-            )
-            time.sleep(delay)
-            continue
-
-        # Non-retryable HTTP error
+    if resp.status_code == 200:
         try:
-            resp.raise_for_status()
-        except HTTPError as exc:
-            raise GoplusError(
-                f"GoPlus non-retryable HTTP {resp.status_code}: {resp.text[:200]}"
-            ) from exc
+            return resp.json()
+        except ValueError as exc:
+            raise GoplusError(f"GoPlus returned non-JSON response: {resp.text[:200]}") from exc
 
-    # All retries exhausted
-    if last_status == 429:
+    # request_json already retries transient 429/5xx statuses.
+    if resp.status_code == 429:
         raise GoplusRateLimitError(
-            f"GoPlus rate limit hit after {_MAX_RETRIES} attempts."
+            "GoPlus rate limit hit after shared retry attempts."
         )
-    if last_status is not None and last_status >= 500:
+    if resp.status_code >= 500:
         raise GoplusUnavailableError(
-            f"GoPlus unavailable (HTTP {last_status}) after {_MAX_RETRIES} attempts."
+            f"GoPlus unavailable (HTTP {resp.status_code}) after shared retry attempts."
         )
 
-    raise GoplusError(
-        f"GoPlus request failed after {_MAX_RETRIES} attempts. Last error: {last_exc}"
-    )
+    try:
+        resp.raise_for_status()
+    except HTTPError as exc:
+        raise GoplusError(
+            f"GoPlus non-retryable HTTP {resp.status_code}: {resp.text[:200]}"
+        ) from exc
+
+    raise GoplusError("GoPlus request failed unexpectedly.")
 
 
 def _flag_bool(value: object) -> bool:

@@ -16,9 +16,6 @@ from intent_hub.utils.messages import require_non_empty_str
 
 
 async def resolve_transfer(intent: Intent) -> ExecutionPlan:
-    """
-    Resolves a TransferIntent into an ExecutionPlan.
-    """
     require_complete_intent(intent)
     slots = intent.slots or {}
     token_symbol = symbol_from_slot(slots.get("token"))

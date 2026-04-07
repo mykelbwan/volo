@@ -1,3 +1,5 @@
+from config.chains import get_chain_by_name
+from core.token_security.registry_lookup import get_registry_decimals_by_address_async
 from intent_hub.ontology.intent import ExecutionPlan, Intent
 from intent_hub.registry.token_service import (
     get_address_for_chain_async,
@@ -12,8 +14,6 @@ from intent_hub.resolver.common import (
     unresolved_addresses_error,
 )
 from intent_hub.utils.amount import to_wei
-from config.chains import get_chain_by_name
-from core.token_security.registry_lookup import get_registry_decimals_by_address_async
 from intent_hub.utils.messages import format_with_recovery, require_non_empty_str
 
 _NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
@@ -40,24 +40,37 @@ async def resolve_swap(intent: Intent) -> ExecutionPlan:
         token_in_symbol,
         chain,
         get_token_data_fn=get_token_data_async,
-        get_address_for_chain_fn=get_address_for_chain_async,
+        get_address_for_chain_fn=lambda token_data, chain_name: (
+            get_address_for_chain_async(dict(token_data), chain_name)
+        ),
         allow_amount_prefixed=True,
     )
     token_out_resolution = await resolve_token_on_chain(
         token_out_symbol,
         chain,
         get_token_data_fn=get_token_data_async,
-        get_address_for_chain_fn=get_address_for_chain_async,
+        get_address_for_chain_fn=lambda token_data, chain_name: (
+            get_address_for_chain_async(dict(token_data), chain_name)
+        ),
         allow_amount_prefixed=False,
     )
 
     token_in_data = token_in_resolution.token_data if token_in_resolution else {}
-    token_out_data = token_out_resolution.token_data if token_out_resolution else {}
     token_in_address = token_in_resolution.address if token_in_resolution else None
     token_out_address = token_out_resolution.address if token_out_resolution else None
-    token_in_symbol_resolved = token_in_resolution.symbol if token_in_resolution else token_in_symbol.upper()
-    token_out_symbol_resolved = token_out_resolution.symbol if token_out_resolution else token_out_symbol.upper()
-    if amount_val is None and token_in_resolution and token_in_resolution.inferred_amount:
+    token_in_symbol_resolved = (
+        token_in_resolution.symbol if token_in_resolution else token_in_symbol.upper()
+    )
+    token_out_symbol_resolved = (
+        token_out_resolution.symbol
+        if token_out_resolution
+        else token_out_symbol.upper()
+    )
+    if (
+        amount_val is None
+        and token_in_resolution
+        and token_in_resolution.inferred_amount
+    ):
         amount_val = token_in_resolution.inferred_amount
 
     try:
@@ -65,14 +78,25 @@ async def resolve_swap(intent: Intent) -> ExecutionPlan:
     except Exception:
         raise ValueError(f"Invalid chain: {chain}")
 
-    if not token_in_address and token_in_symbol_resolved.upper() == chain_cfg.native_symbol.upper():
+    if (
+        not token_in_address
+        and token_in_symbol_resolved.upper() == chain_cfg.native_symbol.upper()
+    ):
         token_in_address = _NATIVE_ADDRESS
-    if not token_out_address and token_out_symbol_resolved.upper() == chain_cfg.native_symbol.upper():
+    if (
+        not token_out_address
+        and token_out_symbol_resolved.upper() == chain_cfg.native_symbol.upper()
+    ):
         token_out_address = _NATIVE_ADDRESS
 
     if not token_in_address or not token_out_address:
+        unresolved_symbols: list[str] = []
+        if not token_in_address:
+            unresolved_symbols.append(token_in_symbol_resolved)
+        if not token_out_address:
+            unresolved_symbols.append(token_out_symbol_resolved)
         raise unresolved_addresses_error(
-            [token_in_symbol_resolved, token_out_symbol_resolved],
+            unresolved_symbols,
             chain_context=chain,
         )
     amount_val = require_amount(amount_val, action="swap")
@@ -93,7 +117,7 @@ async def resolve_swap(intent: Intent) -> ExecutionPlan:
     if is_dynamic_marker(amount_val):
         amount_in_wei = amount_val
     else:
-        amount_in_wei = str(to_wei(amount_val, decimals))
+        amount_in_wei = str(to_wei(str(amount_val), decimals))
 
     return ExecutionPlan(
         intent_type="swap",

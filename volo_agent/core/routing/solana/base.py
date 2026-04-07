@@ -11,15 +11,7 @@ _LOGGER = logging.getLogger("volo.routing.solana")
 
 
 class SolanaSwapAggregator(ABC):
-    #: Machine-readable identifier.  Must be unique across all Solana adapters
-    #: and match the key used in ``PerformanceLedger``
-    #: (e.g. ``"jupiter"``, ``"raydium"``).
     name: str = "unknown"
-
-    #: Per-request timeout in seconds.  Solana aggregators are given a
-    #: slightly longer budget than EVM aggregators (8 s vs 5 s) because
-    #: they build a full signed transaction — not just a price quote.
-    TIMEOUT_SECONDS: float = 8.0
 
     @abstractmethod
     async def get_quote(

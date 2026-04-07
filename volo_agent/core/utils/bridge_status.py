@@ -66,9 +66,6 @@ def fetch_across_status(
     is_testnet: bool,
     meta: Optional[dict] = None,
 ) -> Optional[str]:
-    """
-    Return Across status for a deposit transaction, or None on error.
-    """
     base_url = _across_api_base_url(is_testnet)
 
     def _request_status(params: dict) -> Optional[str]:

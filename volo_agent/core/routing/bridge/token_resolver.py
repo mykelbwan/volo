@@ -35,11 +35,6 @@ async def resolve_bridge_token(
     chain_id: int,
     chain_name: str,
 ) -> Optional[ResolvedBridgeToken]:
-    """
-    Resolve a token for a given chain using the existing registry/cache
-    and Dexscreener fallback. Returns None on any failure so callers can
-    gracefully skip unsupported routes.
-    """
     symbol_upper = symbol.strip().upper()
     chain_name_norm = chain_name.strip().lower()
 

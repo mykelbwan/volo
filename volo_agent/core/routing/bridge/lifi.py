@@ -34,7 +34,6 @@ def _api_key() -> Optional[str]:
 
 
 def _headers() -> Dict[str, str]:
-    """Return request headers, optionally including the API key."""
     h: Dict[str, str] = {"Accept": "application/json"}
     key = _api_key()
     if key:
@@ -221,9 +220,6 @@ def _fetch_quote(
         "fromAddress": from_address,
         "toAddress": to_address,
         "slippage": slippage_fraction,
-        # Request the transaction object so we have execution-ready calldata.
-        "allowBridges": "",  # empty = allow all bridges Li.Fi supports
-        "allowExchanges": "",  # empty = allow all DEXes (for swap-and-bridge routes)
     }
 
     resp = request_json(
@@ -255,7 +251,6 @@ class LiFiAggregator(BridgeAggregator):
     ) -> Optional[BridgeRouteQuote]:
         symbol = token_symbol.strip().upper()
 
-        # ── Resolve chain IDs for Li.Fi (Solana uses a non-EVM id) ─────────
         source_lifi_chain_id, dest_lifi_chain_id = await asyncio.gather(
             _resolve_lifi_chain_id(source_chain_id, source_chain_name),
             _resolve_lifi_chain_id(dest_chain_id, dest_chain_name),
@@ -264,7 +259,6 @@ class LiFiAggregator(BridgeAggregator):
             self._log_failure("could not resolve Li.Fi chain id(s)")
             return None
 
-        # ── Resolve token addresses + decimals via registry/Dexscreener ───
         source_token, dest_token = await asyncio.gather(
             resolve_bridge_token(
                 symbol,
@@ -312,7 +306,6 @@ class LiFiAggregator(BridgeAggregator):
         # configurable via an env var if needed.
         slippage_pct = float(os.getenv("LIFI_DEFAULT_SLIPPAGE_PCT", "0.5"))
 
-        # ── Fetch quote ───────────────────────────────────────────────────
         try:
             data = await run_blocking(
                 partial(

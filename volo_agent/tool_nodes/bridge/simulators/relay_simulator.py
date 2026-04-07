@@ -36,10 +36,6 @@ _currency_cache: Dict[
 
 @dataclass
 class RelayBridgeQuote:
-    """
-    Relay quote wrapper for bridge execution.
-    """
-
     protocol: str
     token_symbol: str
     source_chain_id: int
@@ -314,9 +310,6 @@ def fetch_relay_supported_tokens(
     dest_chain_id: int,
     protocol: BridgeProtocolConfig = RELAY,
 ) -> list[str]:
-    """
-    Return token symbols supported by Relay on the given chain pair.
-    """
     base_url = relay_api_base_url(source_chain_id, dest_chain_id)
     if not base_url or not base_url.startswith("http"):
         return []
@@ -365,9 +358,6 @@ def simulate_relay_bridge(
     recipient: Optional[str] = None,
     protocol: BridgeProtocolConfig = RELAY,
 ) -> RelayBridgeQuote | RelaySimulationError:
-    """
-    Simulate a Relay bridge by calling the Relay /quote endpoint.
-    """
     if not sender or not str(sender).strip():
         raise ValueError("sender address is required.")
 
@@ -544,9 +534,6 @@ async def simulate_relay_bridge_async(
     recipient: Optional[str] = None,
     protocol: BridgeProtocolConfig = RELAY,
 ) -> RelayBridgeQuote | RelaySimulationError:
-    """
-    Async version of simulate_relay_bridge.
-    """
     if not sender or not str(sender).strip():
         raise ValueError("sender address is required.")
 

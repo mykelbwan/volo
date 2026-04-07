@@ -6,9 +6,6 @@ from intent_hub.utils.messages import format_with_recovery
 
 
 def to_wei(amount: Decimal | str | float | int, decimals: int) -> int:
-    """
-    Convert a human-readable amount into base units using token decimals.
-    """
     if not isinstance(decimals, int) or decimals < 0:
         raise ValueError(
             format_with_recovery(

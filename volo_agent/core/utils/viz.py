@@ -2,9 +2,6 @@ from core.planning.execution_plan import ExecutionPlan, ExecutionState
 
 
 def get_status_table(plan: ExecutionPlan, state: ExecutionState) -> str:
-    """
-    Generates a visual ASCII table showing the progress of the execution plan.
-    """
     if not plan or not state:
         return ""
 

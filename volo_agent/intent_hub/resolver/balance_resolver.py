@@ -10,9 +10,6 @@ from intent_hub.utils.messages import format_with_recovery
 
 
 async def resolve_balance(intent: Intent) -> ExecutionPlan:
-    """
-    Resolves a BalanceIntent into an ExecutionPlan.
-    """
     require_complete_intent(intent)
     slots = intent.slots or {}
     chain_name = str(slots.get("chain") or "").strip()

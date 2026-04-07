@@ -56,9 +56,6 @@ async def _get_shared_async_client() -> httpx.AsyncClient:
 
 
 async def close_shared_async_http_clients() -> None:
-    """
-    Close pooled async HTTP clients (mainly useful in graceful shutdown/tests).
-    """
     with _ASYNC_CLIENTS_LOCK:
         clients = list(_ASYNC_CLIENTS.values())
         _ASYNC_CLIENTS.clear()

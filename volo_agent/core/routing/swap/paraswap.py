@@ -59,6 +59,10 @@ def _normalise_token_address(address: str, chain_id: int) -> str:
 
     if addr == _ZERO_ADDRESS:
         return _PARASWAP_NATIVE
+    # ParaSwap `/prices` currently validates token addresses strictly.
+    # Normalize EVM addresses to lowercase before sending.
+    if addr.startswith("0x") and len(addr) == 42:
+        return addr
     return address
 
 
@@ -137,9 +141,10 @@ async def _fetch_transaction(
         "srcDecimals": src_decimals,
         "destDecimals": dest_decimals,
         "srcAmount": str(src_amount_wei),
-        "destAmount": str(dest_amount_min_wei),
         "priceRoute": price_route,
         "userAddress": user_address,
+        # For SELL requests, ParaSwap /transactions expects either slippage or
+        # destAmount, not both.
         "slippage": int(round(slippage_pct * 100)),  # basis points
     }
 
@@ -152,6 +157,7 @@ async def _fetch_transaction(
     resp = await async_request_json(
         "POST",
         url,
+        params={"ignoreChecks": "true"},
         json=payload,
         timeout=timeout,
         service="paraswap-tx",

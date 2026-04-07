@@ -19,7 +19,6 @@ def safe_int(value: Any, fallback: int = 0) -> int:
 
 
 def to_raw(amount: Decimal, decimals: int) -> int:
-    """Convert a human-readable amount to raw integer units."""
     return int(amount * Decimal(10**decimals))
 
 

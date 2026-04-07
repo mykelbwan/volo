@@ -21,17 +21,10 @@ from tool_nodes.common.input_utils import safe_decimal
 from tool_nodes.bridge.executors.evm_utils import to_raw
 from tool_nodes.bridge.simulators.utils import now
 
-# ---------------------------------------------------------------------------
-# Across V3 endpoints
-# Reference: https://docs.across.to/api-reference/suggested-fees
-# ---------------------------------------------------------------------------
 _QUOTE_ENDPOINT = "/suggested-fees"
 _AVAILABLE_ROUTES_ENDPOINT = "/available-routes"
 _TESTNET_API_BASE_URL = "https://testnet.across.to/api"
-
-# Request timeout for the Across API (seconds)
 _REQUEST_TIMEOUT = EXTERNAL_HTTP_TIMEOUT_SECONDS
-
 _AVAILABLE_ROUTES_CACHE_TTL_SECONDS = 300
 _available_routes_cache: dict[
     tuple[str, int, int, str], tuple[float, list[BridgeRoute]]
@@ -181,10 +174,7 @@ def _build_quote_from_response(
     # Across returns all fee components and the final output amount.
     # All amounts from the API are in raw token units (wei-scale).
     try:
-        # Output amount — what the recipient actually receives
         output_amount_raw = int(data["outputAmount"])
-
-        # Fee components (all in raw input token units)
         total_fee_raw = int(
             (data.get("totalRelayFee") or {}).get("total", data.get("relayFeeTotal", 0))
         )
@@ -201,8 +191,6 @@ def _build_quote_from_response(
                 "total", data.get("relayGasFeeTotal", 0)
             )
         )
-
-        # Timing fields — passed verbatim to depositV3
         quote_timestamp = int(data["timestamp"])
         fill_deadline = int(
             data.get("fillDeadline", int(time.time()) + 18000)  # 5h default
@@ -230,7 +218,6 @@ def _build_quote_from_response(
             message=(f"Could not parse Across API response: {e}. Raw response: {data}"),
         )
 
-    # ── Validate the quote makes sense ──────────────────────────────────────
     if output_amount_raw <= 0:
         return AcrossSimulationError(
             reason="NO_LIQUIDITY",
@@ -242,7 +229,6 @@ def _build_quote_from_response(
             ),
         )
 
-    # Sanity check — output should never be more than 2x input (human units)
     output_amount_preview = _from_raw(output_amount_raw, output_decimals)
     if output_amount_preview >= amount_decimal * 2:
         return AcrossSimulationError(
@@ -253,7 +239,6 @@ def _build_quote_from_response(
             ),
         )
 
-    # ── Convert to human-readable units ─────────────────────────────────────
     output_amount = output_amount_preview
     total_fee = _from_raw(total_fee_raw, input_decimals)
     lp_fee = _from_raw(lp_fee_raw, input_decimals)
@@ -424,7 +409,6 @@ def simulate_across_bridge(
     output_token_decimals = output_token_decimals or token_decimals
     input_amount_raw = to_raw(amount_decimal, token_decimals)
 
-    # ── 1. Resolve chain names for display ───────────────────────────────────
     try:
         source_chain = get_chain_by_id(route.source_chain_id)
         dest_chain = get_chain_by_id(route.dest_chain_id)
@@ -434,8 +418,6 @@ def simulate_across_bridge(
             message=str(e),
         )
 
-    # The API returns the relayer fee, LP fee, gas fee, and the exact output
-    # amount the recipient will receive on the destination chain.
     input_token_for_quote = route.input_token
     output_token_for_quote = route.output_token
     if route.is_native_input and source_chain.wrapped_native:
