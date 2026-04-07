@@ -59,6 +59,10 @@ def _normalise_token_address(address: str, chain_id: int) -> str:
 
     if addr == _ZERO_ADDRESS:
         return _PARASWAP_NATIVE
+    # ParaSwap `/prices` currently validates token addresses strictly.
+    # Normalize EVM addresses to lowercase before sending.
+    if addr.startswith("0x") and len(addr) == 42:
+        return addr
     return address
 
 
@@ -137,9 +141,10 @@ async def _fetch_transaction(
         "srcDecimals": src_decimals,
         "destDecimals": dest_decimals,
         "srcAmount": str(src_amount_wei),
-        "destAmount": str(dest_amount_min_wei),
         "priceRoute": price_route,
         "userAddress": user_address,
+        # For SELL requests, ParaSwap /transactions expects either slippage or
+        # destAmount, not both.
         "slippage": int(round(slippage_pct * 100)),  # basis points
     }
 
@@ -152,6 +157,7 @@ async def _fetch_transaction(
     resp = await async_request_json(
         "POST",
         url,
+        params={"ignoreChecks": "true"},
         json=payload,
         timeout=timeout,
         service="paraswap-tx",
@@ -300,6 +306,7 @@ class ParaSwapAggregator(SwapAggregator):
         # ── Phase 2: build transaction calldata ───────────────────────────
         calldata: Optional[str] = None
         to_address: Optional[str] = None
+        tx_data: Dict[str, Any] | None = None
 
         try:
             tx_data = await _fetch_transaction(
@@ -323,6 +330,10 @@ class ParaSwapAggregator(SwapAggregator):
         except Exception as exc:
             self._log_failure("transaction build unexpected error", exc)
 
+        raw_payload: Dict[str, Any] = dict(prices_data)
+        if isinstance(tx_data, dict) and tx_data:
+            raw_payload["transaction"] = tx_data
+
         self._log_debug(
             f"quote ok chain={chain_id} out={amount_out:.6f} "
             f"impact={price_impact_pct:.4f}% gas={gas_estimate} "
@@ -343,5 +354,5 @@ class ParaSwapAggregator(SwapAggregator):
             calldata=calldata,
             to=to_address,
             approval_address=approval_address,
-            raw=prices_data,
+            raw=raw_payload,
         )

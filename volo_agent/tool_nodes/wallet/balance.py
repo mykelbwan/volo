@@ -6,8 +6,6 @@ import time
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List, cast
 
-import httpx
-
 from config.chains import get_chain_by_name
 from core.observer.price_observer import (
     fetch_prices_batch_coingecko,
@@ -136,19 +134,6 @@ _INCLUDE_SOLANA_DEVNET = str(
 # tight loops and consecutive requests.
 _PRICE_CACHE: Dict[str, tuple[float, float | None]] = {}
 _PRICE_CACHE_LOCK = asyncio.Lock()
-_PRICE_HTTP_CLIENT: httpx.AsyncClient | None = None
-_PRICE_HTTP_CLIENT_LOCK = asyncio.Lock()
-
-
-async def _get_price_http_client() -> httpx.AsyncClient:
-    global _PRICE_HTTP_CLIENT
-    async with _PRICE_HTTP_CLIENT_LOCK:
-        if _PRICE_HTTP_CLIENT is None or _PRICE_HTTP_CLIENT.is_closed:
-            _PRICE_HTTP_CLIENT = httpx.AsyncClient(
-                limits=httpx.Limits(max_connections=64, max_keepalive_connections=16),
-                http2=True,
-            )
-        return _PRICE_HTTP_CLIENT
 
 
 def _clean_optional(value: Any) -> str | None:
@@ -478,15 +463,14 @@ async def _resolve_symbol_prices(symbols: set[str]) -> Dict[str, float]:
         return cached
 
     try:
-        client = await _get_price_http_client()
         prices = await asyncio.wait_for(
-            fetch_prices_batch_coingecko(sorted(to_fetch), client),
+            fetch_prices_batch_coingecko(sorted(to_fetch)),
             timeout=_PRICE_LOOKUP_TIMEOUT_SECONDS,
         )
         missing = sorted(to_fetch - set(prices.keys()))
         if missing:
             fallback = await asyncio.wait_for(
-                fetch_prices_dexscreener(missing, client),
+                fetch_prices_dexscreener(missing),
                 timeout=_PRICE_LOOKUP_TIMEOUT_SECONDS,
             )
             prices.update(fallback)

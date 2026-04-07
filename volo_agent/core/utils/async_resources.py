@@ -15,10 +15,6 @@ _RESOURCE_SCOPE: contextvars.ContextVar["AsyncResourceScope | None"] = (
 
 
 class AsyncResourceScope:
-    """
-    Tracks async network clients created during one logical unit of work.
-    """
-
     def __init__(self) -> None:
         self._cdp_client: Any = None
         self._cdp_client_lock = asyncio.Lock()

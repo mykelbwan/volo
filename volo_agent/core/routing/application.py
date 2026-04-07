@@ -96,6 +96,12 @@ def build_swap_route_metadata(
         meta["to"] = quote.to
     if quote.approval_address:
         meta["approval_address"] = quote.approval_address
+    if isinstance(quote.raw, dict):
+        tx_obj = quote.raw.get("transaction")
+        if not isinstance(tx_obj, dict):
+            tx_obj = quote.raw.get("tx")
+        if isinstance(tx_obj, dict) and tx_obj.get("value") not in (None, ""):
+            meta["value"] = tx_obj.get("value")
     return meta
 
 
@@ -220,8 +226,8 @@ def log_decision(
 
 def log_fallback(node_id: str, reason: str) -> str:
     return (
-        f"[ROUTE] {node_id}: no quotes from any source ({reason}) — "
-        "execution will fail fast until a fresh route is planned"
+        f"[ROUTE] {node_id}: route planner could not produce a quote ({reason}). "
+        "Execution will continue with runtime fallback routing."
     )
 
 

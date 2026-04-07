@@ -1,14 +1,3 @@
-"""
-core/planning/vws.py
---------------------
-Virtual Wallet State (VWS) — pure, side-effect-free simulation of wallet
-balance and gas changes across a sequence of planned steps.
-
-This file is a refactor focused on removing duplication (DRY) across the
-step simulators by extracting common gas + token check/deduction logic into
-small helper methods while preserving the original public behaviour.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -19,35 +8,16 @@ from typing import Dict, List, Optional, Tuple
 from core.planning.fee_table import FeeTable
 
 _LOGGER = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-# EVM zero-address — canonical identifier for native tokens (ETH, MATIC, …).
 NATIVE_ADDRESS: str = "0x0000000000000000000000000000000000000000"
-
-# Bridge fee table: protocol → conservative fee rate (as a decimal fraction).
-# These are pessimistic upper bounds, not averages.  Real fees are usually
-# lower; the gap ensures VWS never approves a plan that would arrive short.
 BRIDGE_FEE_TABLE: Dict[str, Decimal] = {
     "across": Decimal("0.002"),  # 0.1–0.2 % typical → use 0.2 %
     "relay": Decimal("0.003"),  # 0.2–0.4 % typical
     "mayan": Decimal("0.005"),  # 0.3–0.5 % incl. Swift relayer fee
     "lifi": Decimal("0.004"),  # aggregated, varies by underlying bridge
-    "socket": Decimal("0.004"),  # aggregated, varies
 }
-
-# Applied on top of the protocol fee as an additional safety margin.
-# Absorbs minor slippage variance so VWS never approves a borderline plan.
 ARRIVAL_BUFFER: Decimal = Decimal("0.995")  # 0.5 % extra margin
-
-# Default fee used for any bridge protocol not in the table above.
 DEFAULT_BRIDGE_FEE: Decimal = Decimal("0.005")  # 0.5 % conservative
 
-# Gas unit estimates — pessimistic upper bounds per tool type.
-# Units are EVM gas units.  For Solana tools the value is 0 because
-# Solana transaction fees are negligible (< $0.001).
 GAS_UNITS: Dict[str, int] = {
     "swap": 200_000,  # Uniswap V3 multi-hop, conservative
     "bridge": 300_000,  # depositV3 / Mayan forwarder, conservative
@@ -60,34 +30,10 @@ GAS_UNITS: Dict[str, int] = {
     "solana_swap": 0,  # Solana fees treated as zero for VWS purposes
 }
 
-# Fallback gas price used only when gas_price_cache has no entry for a chain
-# (e.g. cold start or unknown chain).  30 gwei is a safe Ethereum L1 estimate;
-# L2s are far cheaper so this is always conservative.
 FALLBACK_GAS_PRICE_WEI: int = 30 * 10**9  # 30 gwei
-
-
-# ---------------------------------------------------------------------------
-# Result dataclasses
-# ---------------------------------------------------------------------------
-
 
 @dataclass(frozen=True)
 class StepResult:
-    """
-    Outcome of simulating a single plan step against a VirtualWalletState.
-
-    Attributes
-    ----------
-    success:
-        ``True`` when all balance and gas checks passed.
-    rejection_reason:
-        Human-readable explanation of why the step was rejected.
-        Empty string on success.
-    gas_cost_native:
-        Estimated gas cost in native token units for this step.
-        Always populated, even on failure.
-    """
-
     success: bool
     rejection_reason: str = ""
     gas_cost_native: Decimal = Decimal("0")
@@ -95,68 +41,19 @@ class StepResult:
 
 @dataclass
 class SimulationResult:
-    """
-    Outcome of simulating an entire candidate plan.
-
-    Attributes
-    ----------
-    valid:
-        ``True`` when every step passed all VWS checks.
-    rejection_reasons:
-        Ordered list of reasons each failed step was rejected.
-        Empty when ``valid`` is ``True``.
-    total_gas_cost_native:
-        Sum of estimated gas costs across all steps, keyed by chain name.
-        Used by the plan scorer to compare total cost across candidates.
-    total_estimated_fees:
-        Sum of estimated bridge / protocol fees across all steps.
-        Expressed in the same token units as the bridged amounts.
-    """
-
     valid: bool
     rejection_reasons: List[str] = field(default_factory=list)
     total_gas_cost_native: Dict[str, Decimal] = field(default_factory=dict)
     total_estimated_fees: Decimal = Decimal("0")
 
-
-# ---------------------------------------------------------------------------
-# VirtualWalletState
-# ---------------------------------------------------------------------------
-
-
 class VirtualWalletState:
-    """
-    Simulates wallet balance changes for a sequence of planned steps without
-    making any network calls or touching on-chain state.
-
-    Internal representation
-    -----------------------
-    Balances are stored in a flat dict keyed by ``(chain, token_address)``
-    pairs (both lowercased).  These generic names remain in VWS because the
-    store is shared across swaps, bridges, reservations, and historical
-    snapshots; the neutral transfer contract is normalized before entering VWS.
-    Native tokens are represented by :data:`NATIVE_ADDRESS` (the EVM
-    zero-address) on their respective chain.
-
-    All amounts are ``Decimal`` in human-readable units (e.g. ``Decimal("1.5")``
-    for 1.5 ETH), consistent with the rest of the Volo codebase.
-    """
-
     def __init__(
         self,
         balances: Dict[Tuple[str, str], Decimal],
         fee_table: Optional[FeeTable] = None,
     ) -> None:
-        # Mutable internal state — never shared across candidates.
-        # Keyed as (chain_lower, token_address_lower).
         self._balances: Dict[Tuple[str, str], Decimal] = dict(balances)
-        # Optional FeeTable instance used to compute protocol-specific fees.
-        # When provided, VWS will use it for more accurate bridge fee estimates.
         self._fee_table: Optional[FeeTable] = fee_table
-
-    # ------------------------------------------------------------------
-    # Construction helpers
-    # ------------------------------------------------------------------
 
     @classmethod
     def from_balance_snapshot(
@@ -165,30 +62,6 @@ class VirtualWalletState:
         sender: str,
         fee_table: Optional["FeeTable"] = None,
     ) -> "VirtualWalletState":
-        """
-        Build a ``VirtualWalletState`` from the ``balance_snapshot`` dict
-        stored in ``AgentState``.
-
-        The snapshot is keyed as ``"sender|chain|token_address"`` with values
-        that are string-encoded ``Decimal`` amounts in human-readable units
-        (not wei).  Keys belonging to a different sender are ignored so the
-        VWS only tracks the balances of the wallet that will sign the
-        transactions.
-
-        Parameters
-        ----------
-        snapshot:
-            ``AgentState["balance_snapshot"]`` — may be ``None`` or empty,
-            in which case an empty VWS is returned.
-        sender:
-            Ethereum address of the active wallet (case-insensitive).
-
-        Returns
-        -------
-        VirtualWalletState
-            Initialised with the wallet's known balances.  Missing balances
-            default to ``Decimal("0")`` when queried.
-        """
         balances: Dict[Tuple[str, str], Decimal] = {}
         if not snapshot:
             return cls(balances, fee_table=fee_table)
@@ -224,21 +97,9 @@ class VirtualWalletState:
         return cls(balances, fee_table=fee_table)
 
     def clone(self) -> "VirtualWalletState":
-        """
-        Return a deep copy of this state so each candidate plan can be
-        simulated independently without mutating the original.
-        """
         return VirtualWalletState(dict(self._balances))
 
-    # ------------------------------------------------------------------
-    # Balance accessors
-    # ------------------------------------------------------------------
-
     def get_balance(self, chain: str, token_address: str) -> Decimal:
-        """
-        Return the current simulated balance for *(chain, token_address)*.
-        Returns ``Decimal("0")`` when the token has never been seen.
-        """
         key = (chain.strip().lower(), token_address.strip().lower())
         return self._balances.get(key, Decimal("0"))
 
@@ -248,12 +109,6 @@ class VirtualWalletState:
         token_address: str,
         amount: Decimal,
     ) -> bool:
-        """
-        Subtract *amount* from *(chain, token_address)* balance.
-
-        Returns ``False`` without modifying state when the balance is
-        insufficient — the caller should treat this as a plan rejection.
-        """
         key = (chain.strip().lower(), token_address.strip().lower())
         balance = self._balances.get(key, Decimal("0"))
         if balance < amount:
@@ -267,28 +122,11 @@ class VirtualWalletState:
         token_address: str,
         amount: Decimal,
     ) -> None:
-        """
-        Add *amount* to *(chain, token_address)* balance.
-
-        Used to model tokens arriving on the destination chain after a bridge.
-        """
         key = (chain.strip().lower(), token_address.strip().lower())
         self._balances[key] = self._balances.get(key, Decimal("0")) + amount
 
-    # ------------------------------------------------------------------
-    # Static estimators  (no I/O)
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _gas_price_wei(chain_id: Optional[int]) -> int:
-        """
-        Return the cached gas price in Wei for *chain_id*.
-
-        Uses the module-level ``gas_price_cache`` singleton which is kept
-        warm by the routing layer — this call does **not** make an RPC
-        request.  Falls back to :data:`FALLBACK_GAS_PRICE_WEI` (30 gwei)
-        on any error or cache miss.
-        """
         if chain_id is None:
             return FALLBACK_GAS_PRICE_WEI
         try:
@@ -303,14 +141,6 @@ class VirtualWalletState:
 
     @staticmethod
     def _estimate_gas_cost(tool: str, chain_id: Optional[int]) -> Decimal:
-        """
-        Return the estimated gas cost in native token units for one step.
-
-        Gas cost = gas_units × gas_price_wei / 1e18
-
-        Returns ``Decimal("0")`` for Solana tools or when the chain is
-        unknown (Solana gas is negligible and handled separately).
-        """
         units = GAS_UNITS.get(tool, 200_000)
         if units == 0 or chain_id is None:
             return Decimal("0")
@@ -323,24 +153,6 @@ class VirtualWalletState:
         amount: Decimal,
         protocol: str,
     ) -> Decimal:
-        """
-        Estimate how many tokens arrive on the destination chain after a
-        bridge step using the conservative fee table plus the safety buffer.
-
-        Formula::
-
-            arrival = amount × (1 − fee_rate) × ARRIVAL_BUFFER
-
-        This is a public helper so the plan generator and scorer can use
-        the same formula as the simulation layer.
-
-        Parameters
-        ----------
-        amount:
-            Input amount being bridged (human-readable).
-        protocol:
-            Bridge protocol name, e.g. ``"across"``, ``"mayan"``.
-        """
         fee_rate = BRIDGE_FEE_TABLE.get(protocol.strip().lower(), DEFAULT_BRIDGE_FEE)
         return amount * (Decimal("1") - fee_rate) * ARRIVAL_BUFFER
 
@@ -352,18 +164,6 @@ class VirtualWalletState:
         dst_chain: Optional[str] = None,
         token: Optional[str] = None,
     ) -> Decimal:
-        """
-        Instance-level arrival estimator.
-
-        If a FeeTable was passed to the VirtualWalletState constructor it is
-        used to compute a protocol/token-specific fee (in token units).
-        Otherwise this method falls back to the original conservative
-        BRIDGE_FEE_TABLE percentage-based estimate.
-
-        The returned value is the conservative arrival amount (token units)
-        after subtracting estimated protocol fee and applying ARRIVAL_BUFFER.
-        """
-        # Prefer FeeTable-based fee estimation when available.
         try:
             if self._fee_table is not None:
                 # FeeTable.estimate_fee_for_amount returns (fee_amount, used_rule_or_None)
@@ -390,10 +190,6 @@ class VirtualWalletState:
         fee_rate = BRIDGE_FEE_TABLE.get(protocol.strip().lower(), DEFAULT_BRIDGE_FEE)
         return amount * (Decimal("1") - fee_rate) * ARRIVAL_BUFFER
 
-    # ------------------------------------------------------------------
-    # Helper: consolidated checks (DRY)
-    # ------------------------------------------------------------------
-
     def _perform_gas_check_and_deduct(
         self,
         tool: str,
@@ -403,12 +199,6 @@ class VirtualWalletState:
         gas_profile: Optional[str] = None,
         gas_cost_native_override: Optional[Decimal] = None,
     ) -> Tuple[bool, Decimal, Optional[str]]:
-        """
-        Estimate gas for *tool* on *chain* and deduct it from native_address.
-
-        Returns:
-            (success, gas_cost, rejection_reason_or_None)
-        """
         gas_cost = (
             gas_cost_native_override
             if gas_cost_native_override is not None
@@ -431,12 +221,6 @@ class VirtualWalletState:
         amount: Decimal,
         token_label: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """
-        Ensure *chain/token_address* has at least *amount* and deduct it.
-
-        Returns:
-            (success, rejection_reason_or_None)
-        """
         if not self._deduct(chain, token_address, amount):
             have = self.get_balance(chain, token_address)
             label = token_label or (token_address[:10] + "…")
@@ -452,13 +236,6 @@ class VirtualWalletState:
         amount: Decimal,
         label: str,
     ) -> Tuple[bool, Optional[str]]:
-        """
-        Reserve *amount* from an already-tracked balance for non-step spends.
-
-        This is used by higher-level VWS orchestration to model additional
-        native requirements, such as platform fees, without re-implementing
-        balance deduction logic outside the simulator.
-        """
         if amount <= 0:
             return True, None
         if not self._deduct(chain, token_address, amount):
@@ -469,10 +246,6 @@ class VirtualWalletState:
             )
             return False, reason
         return True, None
-
-    # ------------------------------------------------------------------
-    # Step simulators (use helpers)
-    # ------------------------------------------------------------------
 
     def simulate_swap(
         self,
@@ -487,17 +260,6 @@ class VirtualWalletState:
         gas_cost_native_override: Optional[Decimal] = None,
         tool_name: str = "swap",
     ) -> StepResult:
-        """
-        Simulate a swap step (EVM ``swap`` or Solana ``solana_swap`` tool).
-
-        Checks performed
-        ----------------
-        1. Sufficient native token balance for gas on *chain*.
-        2. Sufficient *token_in* balance for *amount_in*.
-
-        The output amount is not tracked because any positive output can
-        feed the next step — the route planner will compute the exact amount.
-        """
         # Gas check + deduct
         ok, gas_cost, reason = self._perform_gas_check_and_deduct(
             tool=tool_name,
@@ -547,21 +309,6 @@ class VirtualWalletState:
         arrival_amount: Optional[Decimal] = None,
         gas_cost_native_override: Optional[Decimal] = None,
     ) -> StepResult:
-        """
-        Simulate a bridge step.
-
-        Checks performed
-        ----------------
-        1. Sufficient native token on the source chain for gas.
-        2. Sufficient *token_address* balance on source chain for *amount*.
-
-        Side effects on success
-        -----------------------
-        * Deducts *amount* from the source-chain token balance.
-        * Credits the estimated arrival amount to the destination-chain
-          token balance so subsequent steps on the destination chain can
-          see the funds.
-        """
         # Gas check + deduct
         ok, gas_cost, reason = self._perform_gas_check_and_deduct(
             tool="bridge",
@@ -612,12 +359,6 @@ class VirtualWalletState:
         gas_profile: str = "transfer",
         gas_cost_native_override: Optional[Decimal] = None,
     ) -> StepResult:
-        """
-        Simulate a transfer step.
-
-        Checks: sufficient gas + sufficient token balance.  The recipient
-        balance is not tracked (VWS only models the sender's wallet).
-        """
         # Gas check + deduct
         ok, gas_cost, reason = self._perform_gas_check_and_deduct(
             tool="transfer",
@@ -656,13 +397,6 @@ class VirtualWalletState:
         native_address: str = NATIVE_ADDRESS,
         gas_cost_native_override: Optional[Decimal] = None,
     ) -> StepResult:
-        """
-        Simulate unwrapping wrapped native token (e.g. WETH -> ETH).
-
-        Checks: sufficient native gas + sufficient wrapped token balance.
-        Side effects on success: deduct wrapped token amount and credit the
-        same amount as native balance on the same chain.
-        """
         ok, gas_cost, reason = self._perform_gas_check_and_deduct(
             tool="unwrap",
             chain=chain,
@@ -693,12 +427,7 @@ class VirtualWalletState:
         self._add(chain, native_address, amount_wrapped)
         return StepResult(success=True, gas_cost_native=gas_cost)
 
-    # ------------------------------------------------------------------
-    # Debug helpers
-    # ------------------------------------------------------------------
-
     def snapshot(self) -> Dict[Tuple[str, str], Decimal]:
-        """Return a read-only copy of the current balance map."""
         return dict(self._balances)
 
     def __repr__(self) -> str:

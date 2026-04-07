@@ -32,10 +32,6 @@ def _get_resolver(intent_type: str) -> Callable[[Intent], Awaitable[Any]] | None
 
 
 async def resolve_intent(intent: Intent):
-    """
-    Routes the validated intent to its specific resolver.
-    Returns a structured ExecutionPlan.
-    """
     resolver = _get_resolver(intent.intent_type)
     if resolver is None:
         raise NotImplementedError(

@@ -5,8 +5,7 @@ import os
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
-import httpx
-
+from core.utils.http import async_request_json
 from core.routing.models import SolanaSwapRouteQuote
 from core.routing.solana.base import SolanaSwapAggregator
 from core.routing.solana.utils import (
@@ -18,37 +17,18 @@ from core.routing.utils import safe_decimal as _safe_decimal
 from config.solana_chains import get_solana_chain, normalize_solana_mint
 
 _LOGGER = logging.getLogger("volo.routing.solana.jupiter")
-_DEFAULT_API_BASE = "https://quote-api.jup.ag/v6"
+# Jupiter migrated quote/swap routes to /swap/v1 on the current API hosts.
+_DEFAULT_API_BASE = "https://lite-api.jup.ag/swap/v1"
 
 _QUOTE_PATH = "/quote"
 _SWAP_PATH = "/swap"
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _api_base() -> str:
     return os.getenv("JUPITER_API_URL", _DEFAULT_API_BASE).rstrip("/")
-
-
-# ---------------------------------------------------------------------------
-# Adapter
-# ---------------------------------------------------------------------------
-
 
 class JupiterAggregator(SolanaSwapAggregator):
     name: str = "jupiter"
     TIMEOUT_SECONDS: float = 8.0
-
-    def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(timeout=self.TIMEOUT_SECONDS)
-        return self._client
 
     async def get_quote(
         self,
@@ -89,23 +69,19 @@ class JupiterAggregator(SolanaSwapAggregator):
         base = _api_base()
 
         try:
-            client = await self._get_client()
-            # ── Phase 1: GET /quote ───────────────────────────────────
-            quote_resp = await client.get(
+            quote_resp = await async_request_json(
+                "GET",
                 f"{base}{_QUOTE_PATH}",
+                service="jupiter-quote",
+                timeout=self.TIMEOUT_SECONDS,
                 params={
                     "inputMint": input_mint,
                     "outputMint": output_mint,
                     "amount": str(amount_lamports),
                     "slippageBps": slippage_bps,
-                    # Allow multi-hop routes for better pricing.
                     "onlyDirectRoutes": "false",
-                    # Use versioned transactions (required for Lookup Tables).
                     "asLegacyTransaction": "false",
-                    # Include platform fee info in the response.
                     "platformFeeBps": "0",
-                    # Passing userPublicKey here allows Jupiter to include
-                    # platform fees (if any) and optimize for the specific user.
                     "userPublicKey": sender,
                 },
             )
@@ -136,28 +112,22 @@ class JupiterAggregator(SolanaSwapAggregator):
                 min_out_lamports, output_decimals
             )
 
-            # ── Phase 2: POST /swap ───────────────────────────────────
             # Build the unsigned VersionedTransaction from the quote.
-            swap_resp = await client.post(
+            swap_resp = await async_request_json(
+                "POST",
                 f"{base}{_SWAP_PATH}",
+                service="jupiter-swap",
+                timeout=self.TIMEOUT_SECONDS,
                 json={
                     "quoteResponse": quote_data,
                     "userPublicKey": sender,
-                    # Automatically wrap SOL → WSOL on input and
-                    # unwrap WSOL → SOL on output when applicable.
                     "wrapAndUnwrapSol": True,
-                    # Let Jupiter dynamically set the compute unit limit
-                    # based on the simulated transaction.
                     "dynamicComputeUnitLimit": True,
-                    # Auto priority fee adapts to current network load.
                     "prioritizationFeeLamports": "auto",
                 },
             )
 
             if swap_resp.status_code == 429:
-                # Rate-limited at the swap step — still return price data
-                # without a transaction so the scorer can compare against
-                # Raydium, but execution will fall back to Raydium's tx.
                 self._log_failure(
                     "rate-limited on /swap (429) — returning price-only quote"
                 )
@@ -182,19 +152,8 @@ class JupiterAggregator(SolanaSwapAggregator):
 
             if not swap_transaction:
                 self._log_failure("swap response missing swapTransaction field")
-                # Return the price quote without a transaction — the
-                # executor will rebuild it at runtime if this quote wins.
                 swap_transaction = None
 
-        except httpx.TimeoutException as exc:
-            self._log_failure("request timed out", exc)
-            return None
-        except httpx.HTTPStatusError as exc:
-            self._log_failure(f"HTTP {exc.response.status_code} from Jupiter API", exc)
-            return None
-        except httpx.RequestError as exc:
-            self._log_failure("network error contacting Jupiter API", exc)
-            return None
         except Exception as exc:
             self._log_failure("unexpected error", exc)
             return None

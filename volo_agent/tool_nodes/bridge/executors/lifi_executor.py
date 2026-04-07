@@ -138,7 +138,8 @@ async def _execute_solana(
     data_b64 = tx_request.get("data")
     if not isinstance(data_b64, str) or not data_b64.strip():
         raise NonRetryableError(
-            "The bridge transaction data is missing. Please try again."
+            "The LiFi Solana route is missing its base64 transaction payload. "
+            "Please request a fresh quote."
         )
     try:
         signed = await sign_solana_transaction(sub_org_id, data_b64, sign_with=sender)
@@ -242,11 +243,13 @@ async def execute_lifi_bridge(
 
     if not isinstance(tx_request, dict):
         raise NonRetryableError(
-            "The bridge quote is missing the transaction data. Please try again."
+            "The LiFi quote is missing a valid transactionRequest object. "
+            "Please request a fresh quote."
         )
 
     to_addr = tx_request.get("to")
-    calldata = tx_request.get("data") or "0x"
+    raw_data = tx_request.get("data")
+    calldata = raw_data or "0x"
     value_raw = tx_request.get("value") or "0x0"
     gas_limit_raw = tx_request.get("gasLimit") or tx_request.get("gas")
     chain_id_raw = tx_request.get("chainId") or source_chain_id
@@ -254,11 +257,15 @@ async def execute_lifi_bridge(
 
     if tool_from_chain_id is not None and tool_from_chain_id != source_chain_id:
         raise NonRetryableError(
-            "The bridge quote chain does not match the requested source chain. Please request a fresh quote."
+            "The LiFi quote source chain does not match the request "
+            f"(quote={tool_from_chain_id}, requested={source_chain_id}). "
+            "Please request a fresh quote."
         )
     if tool_to_chain_id is not None and tool_to_chain_id != dest_chain_id:
         raise NonRetryableError(
-            "The bridge quote destination chain does not match the request. Please request a fresh quote."
+            "The LiFi quote destination chain does not match the request "
+            f"(quote={tool_to_chain_id}, requested={dest_chain_id}). "
+            "Please request a fresh quote."
         )
 
     if (not to_addr) and isinstance(calldata, str) and not _is_hex_data(calldata):
@@ -287,15 +294,25 @@ async def execute_lifi_bridge(
             to_chain_id=to_chain_id,
         )
 
+    if not to_addr and (raw_data is None or str(raw_data).strip() == ""):
+        raise NonRetryableError(
+            "The LiFi quote is missing executable transaction data: "
+            "neither transactionRequest.to (EVM) nor transactionRequest.data (Solana) is present. "
+            "Please request a fresh quote."
+        )
+
     if not to_addr:
         raise NonRetryableError(
-            "The bridge quote is missing a destination contract. Please try again."
+            "The LiFi EVM transaction is missing transactionRequest.to (destination contract). "
+            "Please request a fresh quote."
         )
 
     chain_id = safe_int(chain_id_raw, source_chain_id)
     if chain_id != source_chain_id:
         raise NonRetryableError(
-            "The bridge transaction targets the wrong source chain. Please request a fresh quote."
+            "The LiFi transaction targets the wrong source chain "
+            f"(tx={chain_id}, requested={source_chain_id}). "
+            "Please request a fresh quote."
         )
     value_wei = safe_int(value_raw)
     gas_limit = safe_int(gas_limit_raw, _GAS_FALLBACK)

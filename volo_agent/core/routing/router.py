@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,7 +18,6 @@ from core.observer.price_observer import price_cache
 from core.routing.bridge.base import BridgeAggregator
 from core.routing.bridge.lifi import LiFiAggregator
 from core.routing.bridge.mayan import MayanAggregator
-from core.routing.bridge.socket import SocketAggregator
 from core.routing.bridge.token_resolver import resolve_bridge_token
 from core.routing.models import (
     BridgeRouteQuote,
@@ -38,6 +38,12 @@ from wallet_service.evm.gas_price import gas_price_cache
 _LOGGER = logging.getLogger("volo.routing.router")
 # Timeout for each internal simulator call (blocking, runs in thread pool).
 _INTERNAL_SIMULATOR_TIMEOUT: float = 5.0
+
+
+@dataclass(frozen=True)
+class _TimedCallOutcome:
+    value: Optional[Any]
+    error: Optional[str] = None
 
 def _convert_v3_quote(
     v3_result: Any,
@@ -285,6 +291,30 @@ async def _timed_aggregator_call(
         return None
 
 
+async def _timed_aggregator_call_with_outcome(
+    coro,
+    source_name: str,
+    timeout: float,
+) -> _TimedCallOutcome:
+    try:
+        value = await asyncio.wait_for(coro, timeout=timeout)
+        return _TimedCallOutcome(value=value, error=None)
+    except asyncio.TimeoutError:
+        _LOGGER.warning("[router] %s timed out after %.1fs", source_name, timeout)
+        return _TimedCallOutcome(
+            value=None,
+            error=f"timed out after {timeout:.1f}s",
+        )
+    except Exception as exc:
+        _LOGGER.warning(
+            "[router] %s raised %s: %s", source_name, type(exc).__name__, exc
+        )
+        return _TimedCallOutcome(
+            value=None,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
 async def _get_gas_cost_usd_fallback(
     chain_id: int,
     gas_estimate: Optional[int] = None,
@@ -339,7 +369,6 @@ class RoutePlanner:
         # Bridge aggregators
         self.bridge_aggregators: List[BridgeAggregator] = bridge_aggregators or [
             LiFiAggregator(),
-            SocketAggregator(),
             # Mayan activates only when one chain is Solana — returns None
             # immediately for pure EVM↔EVM routes so it adds zero overhead.
             MayanAggregator(),
@@ -397,7 +426,9 @@ class RoutePlanner:
         chain_id = chain_cfg.chain_id
         chain_name_canonical = chain_cfg.name
 
-        # ── Build coroutines for all sources ──────────────────────────────
+        # ── Build coroutines for external aggregators only ────────────────
+        # Internal V3/V2 execution is intentionally deferred to swap_tool
+        # fallback, so route discovery remains non-blocking and lightweight.
         tasks: List[Tuple[str, Any]] = []  # (source_name, coroutine_or_awaitable)
 
         # External aggregators
@@ -413,48 +444,10 @@ class RoutePlanner:
             tasks.append(
                 (
                     agg.name,
-                    _timed_aggregator_call(coro, agg.name, agg.TIMEOUT_SECONDS),
-                )
-            )
-
-        # Internal V3 simulator (if supported on this chain)
-        if chain_cfg.v3_quoter and chain_cfg.v3_router:
-            tasks.append(
-                (
-                    "uniswap_v3",
-                    _timed_aggregator_call(
-                        self._run_v3_simulator(
-                            token_in=token_in,
-                            token_out=token_out,
-                            amount_in=float(amount_in),
-                            sender=effective_sender,
-                            slippage_pct=slippage_pct,
-                            chain_name=chain_name_canonical,
-                            chain_id=chain_id,
-                        ),
-                        "uniswap_v3",
-                        _INTERNAL_SIMULATOR_TIMEOUT,
-                    ),
-                )
-            )
-
-        # Internal V2 simulator (if supported on this chain)
-        if chain_cfg.v2_router and chain_cfg.v2_factory:
-            tasks.append(
-                (
-                    "uniswap_v2",
-                    _timed_aggregator_call(
-                        self._run_v2_simulator(
-                            token_in=token_in,
-                            token_out=token_out,
-                            amount_in=float(amount_in),
-                            sender=effective_sender,
-                            slippage_pct=slippage_pct,
-                            chain_name=chain_name_canonical,
-                            chain_id=chain_id,
-                        ),
-                        "uniswap_v2",
-                        _INTERNAL_SIMULATOR_TIMEOUT,
+                    _timed_aggregator_call_with_outcome(
+                        coro,
+                        agg.name,
+                        agg.TIMEOUT_SECONDS,
                     ),
                 )
             )
@@ -472,7 +465,15 @@ class RoutePlanner:
 
         # ── Collect valid SwapRouteQuote objects ──────────────────────────
         quotes: List[SwapRouteQuote] = []
-        for name, result in zip(source_names, raw_results):
+        source_failures: Dict[str, str] = {}
+        for name, outcome in zip(source_names, raw_results):
+            if isinstance(outcome, _TimedCallOutcome):
+                result = outcome.value
+                failure = outcome.error
+            else:
+                result = outcome
+                failure = None
+
             if isinstance(result, SwapRouteQuote):
                 # ── Approach B: Normalize gas cost if missing ─────────────
                 if result.gas_cost_usd is None and result.gas_estimate > 0:
@@ -490,16 +491,29 @@ class RoutePlanner:
                     result.gas_cost_usd,
                 )
             else:
-                _LOGGER.debug("[router:swap] %s returned no quote", name)
+                source_failures[name] = failure or "no quote returned"
+                _LOGGER.debug(
+                    "[router:swap] %s returned no quote (%s)",
+                    name,
+                    source_failures[name],
+                )
 
         if not quotes:
+            failure_summary = "; ".join(
+                f"{name}={reason}" for name, reason in source_failures.items()
+            ) or "no quote returned"
             _LOGGER.warning(
-                "[router:swap] all sources failed for %s→%s on %s",
+                "[router:swap] all sources failed for %s→%s on %s (%s)",
                 token_in[:10],
                 token_out[:10],
                 chain_name_canonical,
+                failure_summary,
             )
-            return None
+            raise RuntimeError(
+                "Swap route discovery failed for "
+                f"{token_in[:10]}→{token_out[:10]} on {chain_name_canonical}. "
+                f"Source failures: {failure_summary}."
+            )
 
         # ── Score and select best quote ───────────────────────────────────
         best_result = pick_best_swap(quotes, ledger, chain_name_canonical)
@@ -763,7 +777,7 @@ class RoutePlanner:
         # ── Build coroutines for all sources ──────────────────────────────
         tasks: List[Tuple[str, Any]] = []
 
-        # External aggregators (Li.Fi, Socket)
+        # External aggregators (Li.Fi, Mayan for Solana routes)
         for agg in self.bridge_aggregators:
             coro = agg.get_quote(
                 token_symbol=token_symbol,
@@ -843,7 +857,7 @@ class RoutePlanner:
             if isinstance(result, BridgeRouteQuote):
                 # ── Approach B: Normalize gas cost if missing ─────────────
                 if result.gas_cost_usd is None:
-                    # Case 1: Fetch from tool_data (Socket provides this)
+                    # Case 1: Fetch directly from aggregator tool_data
                     raw_usd = (
                         result.tool_data.get("gasCostUsd") if result.tool_data else None
                     )

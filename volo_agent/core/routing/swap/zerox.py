@@ -44,6 +44,18 @@ def _normalise_token_address(address: str) -> str:
     return address
 
 
+def _normalise_taker_address(address: str) -> Optional[str]:
+    candidate = str(address or "").strip()
+    if (
+        candidate
+        and "{{" not in candidate
+        and candidate.startswith("0x")
+        and len(candidate) == 42
+    ):
+        return candidate
+    return None
+
+
 def _to_wei(amount: Decimal, decimals: int) -> int:
     return int(amount * Decimal(10**decimals))
 
@@ -69,6 +81,9 @@ async def _fetch_quote(
         "sellToken": sell_token,
         "buyToken": buy_token,
         "sellAmount": str(sell_amount_wei),
+        # 0x Permit2 quote now validates `taker`; keep `takerAddress` for
+        # backward compatibility across gateway versions.
+        "taker": taker_address,
         "takerAddress": taker_address,
         "slippageBps": slippage_bps,
     }
@@ -128,6 +143,10 @@ class ZeroXAggregator(SwapAggregator):
             native_token_address=_NATIVE_TOKEN_ADDRESS,
         )
         sell_amount_wei = _to_wei(amount_in, in_decimals)
+        taker = _normalise_taker_address(sender)
+        if not taker:
+            self._log_debug("sender is missing/invalid for required 0x 'taker' field — skipping")
+            return None
 
         timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
 
@@ -138,13 +157,13 @@ class ZeroXAggregator(SwapAggregator):
                 sell_token,
                 buy_token,
                 sell_amount_wei,
-                sender,
+                taker,
                 slippage_pct,
                 timeout,
             )
         except ExternalServiceError as exc:
             self._log_failure("API error", exc)
-            return None
+            raise RuntimeError(f"0x quote API error: {exc}") from exc
         except Exception as exc:
             self._log_failure("unexpected error", exc)
             return None

@@ -17,7 +17,6 @@ class BridgeStatusRuntimeDeps:
     infer_across_deposit_meta: Callable[[str, str], Awaitable[Optional[Dict[str, Any]]]]
     infer_is_testnet: Callable[[Dict[str, Any]], bool]
     normalize_lifi_meta: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
-    normalize_socket_meta: Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]
     normalize_pending: Callable[[Dict[str, Any]], Dict[str, Any]]
     normalize_tx_hash: Callable[[str], str]
     apply_status_update: Callable[..., Dict[str, Any]]
@@ -119,19 +118,6 @@ async def process_pending_records(
             meta = deps.normalize_lifi_meta(
                 meta if isinstance(meta, dict) else {}, normalized
             )
-        elif protocol_lower == "socket":
-            meta = deps.normalize_socket_meta(
-                meta if isinstance(meta, dict) else {}, normalized
-            )
-            if meta.get("fromChainId") is None or meta.get("toChainId") is None:
-                if debug:
-                    print(
-                        "[bridge-status] socket missing chain ids "
-                        f"tx={tx_hash} meta={meta}"
-                    )
-                normalized = {**normalized, "meta": meta}
-                updated_pending.append(normalized)
-                continue
 
         if meta != (normalized.get("meta") or {}):
             normalized = {**normalized, "meta": meta}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from config.planner_config import (
     MIN_TOTAL_RUNS_FOR_RELIABILITY,
@@ -72,7 +72,9 @@ class PlanScore:
 
 
 def _label_for_plan(plan: Any) -> str:
-    return str(getattr(plan, "metadata", {}).get("vws_label") or f"plan_v{plan.version}")
+    return str(
+        getattr(plan, "metadata", {}).get("vws_label") or f"plan_v{plan.version}"
+    )
 
 
 def _success_rate(ledger: Any, *, aggregator: str, chain: str) -> float:
@@ -101,14 +103,18 @@ def failure_risk_for_plan(plan: Any, ledger: Any = None) -> float:
     for node in getattr(plan, "nodes", {}).values():
         route_meta = (getattr(node, "metadata", {}) or {}).get("route") or {}
         aggregator = str(route_meta.get("aggregator") or "").strip().lower()
-        chain = str(
-            route_meta.get("source_chain")
-            or route_meta.get("chain")
-            or node.args.get("source_chain")
-            or node.args.get("chain")
-            or node.args.get("network")
-            or ""
-        ).strip().lower()
+        chain = (
+            str(
+                route_meta.get("source_chain")
+                or route_meta.get("chain")
+                or node.args.get("source_chain")
+                or node.args.get("chain")
+                or node.args.get("network")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
         node_rates.append(_success_rate(ledger, aggregator=aggregator, chain=chain))
 
     if not node_rates:
@@ -242,12 +248,16 @@ def pick_best(plans: List[Any], ledger: Any = None) -> Tuple[Any, List[PlanScore
             CandidatePlanSimulationResult(
                 plan=plan,
                 label=_label_for_plan(plan),
-                simulation=type("Sim", (), {"valid": True, "failure": None})(),
+                simulation=__import__("typing").cast(
+                    Any, type("Sim", (), {"valid": True, "failure": None})()
+                ),
                 final_balances={},
                 per_step_state_transitions={},
                 total_gas_cost_native=gas_cost,
                 gas_cost_by_step={},
-                latency_estimate_seconds=int(meta.get("estimated_latency_seconds") or 0),
+                latency_estimate_seconds=int(
+                    meta.get("estimated_latency_seconds") or 0
+                ),
                 output_value=output_value,
             )
         )

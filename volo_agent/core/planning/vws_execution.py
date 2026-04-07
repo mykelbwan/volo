@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
-from decimal import Decimal
 import hashlib
 import json
 import logging
 import time
+from collections import deque
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 from config.chains import get_chain_by_name
@@ -18,6 +18,13 @@ from core.planning.execution_plan import (
     StepStatus,
     resolve_dynamic_args,
 )
+from core.planning.vws import (
+    FALLBACK_GAS_PRICE_WEI,
+    GAS_UNITS,
+    NATIVE_ADDRESS,
+    StepResult,
+    VirtualWalletState,
+)
 from core.routing.route_meta import (
     canonicalize_route_meta,
     is_route_expired,
@@ -27,13 +34,6 @@ from core.routing.route_meta import (
     preflight_from_route_meta,
     route_meta_strictly_enforced,
     validate_route_meta,
-)
-from core.planning.vws import (
-    FALLBACK_GAS_PRICE_WEI,
-    GAS_UNITS,
-    NATIVE_ADDRESS,
-    StepResult,
-    VirtualWalletState,
 )
 from core.transfers.planning import (
     TransferPlanningMetadata,
@@ -73,7 +73,9 @@ def _topological_order(plan: ExecutionPlan) -> List[str]:
             in_degree[node_id] += 1
             children.setdefault(dep_id, []).append(node_id)
 
-    queue = deque(sorted(node_id for node_id, degree in in_degree.items() if degree == 0))
+    queue = deque(
+        sorted(node_id for node_id, degree in in_degree.items() if degree == 0)
+    )
     ordered: List[str] = []
     while queue:
         node_id = queue.popleft()
@@ -119,7 +121,9 @@ def _native_token_ref(node_args: Dict[str, Any]) -> str:
 
 def _node_chain_name(node_tool: str, node_args: Dict[str, Any]) -> str:
     if node_tool == "bridge":
-        return str(node_args.get("source_chain") or node_args.get("chain") or "").strip()
+        return str(
+            node_args.get("source_chain") or node_args.get("chain") or ""
+        ).strip()
     return str(node_args.get("chain") or node_args.get("network") or "").strip()
 
 
@@ -168,7 +172,10 @@ def _estimate_native_gas_cost(
 
     gas_units_raw = preflight.get("gas_estimate")
     try:
-        gas_units = int(gas_units_raw)
+        if gas_units_raw is not None:
+            gas_units = int(gas_units_raw)
+        else:
+            gas_units = GAS_UNITS.get(gas_profile, _DEFAULT_GAS_UNITS)
     except Exception:
         gas_units = GAS_UNITS.get(gas_profile, _DEFAULT_GAS_UNITS)
 
@@ -317,7 +324,9 @@ class VWSPlanSimulation:
     valid: bool
     projected_deltas: Dict[str, Decimal] = field(default_factory=dict)
     native_requirements: Dict[str, Decimal] = field(default_factory=dict)
-    reservation_requirements: Dict[str, List[VWSRequirement]] = field(default_factory=dict)
+    reservation_requirements: Dict[str, List[VWSRequirement]] = field(
+        default_factory=dict
+    )
     node_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     failure: Optional[VWSFailure] = None
     ending_balances: Dict[str, str] = field(default_factory=dict)
@@ -394,7 +403,9 @@ def simulate_execution_plan(
         sender_key = sender.strip().lower()
         chain_key = chain_name.strip().lower()
         token_key = token_ref.strip().lower()
-        initial_balances_by_sender.setdefault(sender_key, {})[(chain_key, token_key)] = amount
+        initial_balances_by_sender.setdefault(sender_key, {})[
+            (chain_key, token_key)
+        ] = amount
 
     for sender, balances in initial_balances_by_sender.items():
         vws_by_sender[sender] = VirtualWalletState(balances=balances)
@@ -510,7 +521,9 @@ def simulate_execution_plan(
         if route_validation.should_use_route_meta and isinstance(route_meta, dict):
             try:
                 validate_route_meta(route_meta)
-                canonical_route_meta = canonicalize_route_meta(route_meta, tool=node.tool)
+                canonical_route_meta = canonicalize_route_meta(
+                    route_meta, tool=node.tool
+                )
             except Exception as exc:
                 _LOGGER.warning(
                     "route_validation %s",
@@ -548,7 +561,9 @@ def simulate_execution_plan(
             )
             validation_payload["node_id"] = node_id
             _LOGGER.info("route_validation %s", validation_payload)
-            expiry_payload = log_route_expiry(route_meta=canonical_route_meta, now=route_now)
+            expiry_payload = log_route_expiry(
+                route_meta=canonical_route_meta, now=route_now
+            )
             expiry_payload["node_id"] = node_id
             if is_route_expired(canonical_route_meta, route_now):
                 _LOGGER.warning("route_expiry %s", expiry_payload)
@@ -603,11 +618,17 @@ def simulate_execution_plan(
         if node.tool in {"swap", "solana_swap"}:
             chain_name = _node_chain_name(node.tool, resolved_args)
             token_in_ref = _normalize_token_ref(
-                resolved_args.get("token_in_address") or resolved_args.get("token_in_mint"),
+                resolved_args.get("token_in_address")
+                or resolved_args.get("token_in_mint"),
                 resolved_args,
             )
             amount_in = _to_decimal(resolved_args.get("amount_in"))
-            if not chain_name or not token_in_ref or amount_in is None or amount_in <= 0:
+            if (
+                not chain_name
+                or not token_in_ref
+                or amount_in is None
+                or amount_in <= 0
+            ):
                 return VWSPlanSimulation(
                     valid=False,
                     projected_deltas=projected_deltas,
@@ -700,7 +721,8 @@ def simulate_execution_plan(
             source_chain = _node_chain_name(node.tool, resolved_args)
             target_chain = str(resolved_args.get("target_chain") or "").strip()
             token_in_ref = _normalize_token_ref(
-                resolved_args.get("source_address") or resolved_args.get("token_address"),
+                resolved_args.get("source_address")
+                or resolved_args.get("token_address"),
                 resolved_args,
             )
             dest_token_ref, output_amount = _extract_simulated_output(
@@ -762,11 +784,15 @@ def simulate_execution_plan(
                 node_args=resolved_args,
                 preflight=preflight,
             )
-            protocol = str(
-                preflight.get("protocol")
-                or (route_meta or {}).get("aggregator")
-                or "across"
-            ).strip().lower()
+            protocol = (
+                str(
+                    preflight.get("protocol")
+                    or (route_meta or {}).get("aggregator")
+                    or "across"
+                )
+                .strip()
+                .lower()
+            )
             step_result = vws.simulate_bridge(
                 source_chain=source_chain,
                 source_chain_id=None,
@@ -881,11 +907,15 @@ def simulate_execution_plan(
 
         elif node.tool == "unwrap":
             chain_name = _node_chain_name(node.tool, resolved_args)
-            wrapped_ref = str(
-                resolved_args.get("token_address")
-                or resolved_args.get("token_in_address")
-                or ""
-            ).strip().lower()
+            wrapped_ref = (
+                str(
+                    resolved_args.get("token_address")
+                    or resolved_args.get("token_in_address")
+                    or ""
+                )
+                .strip()
+                .lower()
+            )
             if not chain_name or not wrapped_ref:
                 return VWSPlanSimulation(
                     valid=False,
@@ -963,9 +993,7 @@ def simulate_execution_plan(
                     "output_amount": str(amount),
                     "amount": str(amount),
                     "token_symbol": resolved_args.get("token_symbol"),
-                    "wrapped_token_symbol": resolved_args.get(
-                        "wrapped_token_symbol"
-                    ),
+                    "wrapped_token_symbol": resolved_args.get("wrapped_token_symbol"),
                 }
 
         else:
@@ -1002,7 +1030,9 @@ def simulate_execution_plan(
             if node.tool in {"transfer", "unwrap"}:
                 try:
                     if node.tool == "transfer":
-                        transfer_meta = resolve_transfer_planning_metadata(resolved_args)
+                        transfer_meta = resolve_transfer_planning_metadata(
+                            resolved_args
+                        )
                         native_chain = transfer_meta.network
                         native_token_ref = transfer_meta.native_asset_ref
                     else:
@@ -1045,10 +1075,13 @@ def simulate_execution_plan(
                         reason=reason or "platform fee shortfall",
                     ),
                 )
-            native_requirements[node_id] = native_requirements.get(
-                node_id,
-                Decimal("0"),
-            ) + platform_fee_native
+            native_requirements[node_id] = (
+                native_requirements.get(
+                    node_id,
+                    Decimal("0"),
+                )
+                + platform_fee_native
+            )
             reservation_requirements.setdefault(node_id, []).append(
                 VWSRequirement(
                     sender=sender,
@@ -1088,10 +1121,13 @@ def simulate_execution_plan(
             delta = after_amount - before_amount
             if delta != 0:
                 serialized_key = _resource_key(sender, chain_key, token_key)
-                projected_deltas[serialized_key] = projected_deltas.get(
-                    serialized_key,
-                    Decimal("0"),
-                ) + delta
+                projected_deltas[serialized_key] = (
+                    projected_deltas.get(
+                        serialized_key,
+                        Decimal("0"),
+                    )
+                    + delta
+                )
                 delta_map[serialized_key] = str(delta)
             ending_map[_resource_key(sender, chain_key, token_key)] = str(after_amount)
 
@@ -1106,13 +1142,17 @@ def simulate_execution_plan(
             "ending_balances": ending_map,
             "resolved_args": resolved_args,
             "route_meta_used": bool(route_validation.should_use_route_meta),
-            "route_meta_fallback": bool(route_validation.fallback_policy.allow_fallback),
+            "route_meta_fallback": bool(
+                route_validation.fallback_policy.allow_fallback
+            ),
             "route_meta_reason": route_validation.reason,
         }
         if prefix_cache is not None:
             prefix_cache[step_cache_key] = _SimulationCheckpoint(
                 current_state=_clone_execution_state(current_state),
-                vws_by_sender={key: value.clone() for key, value in vws_by_sender.items()},
+                vws_by_sender={
+                    key: value.clone() for key, value in vws_by_sender.items()
+                },
                 projected_deltas=dict(projected_deltas),
                 native_requirements=dict(native_requirements),
                 reservation_requirements={
@@ -1140,11 +1180,14 @@ def simulate_execution_plan(
 def _clone_checkpoint(checkpoint: _SimulationCheckpoint) -> _SimulationCheckpoint:
     return _SimulationCheckpoint(
         current_state=_clone_execution_state(checkpoint.current_state),
-        vws_by_sender={key: value.clone() for key, value in checkpoint.vws_by_sender.items()},
+        vws_by_sender={
+            key: value.clone() for key, value in checkpoint.vws_by_sender.items()
+        },
         projected_deltas=dict(checkpoint.projected_deltas),
         native_requirements=dict(checkpoint.native_requirements),
         reservation_requirements={
-            key: list(value) for key, value in checkpoint.reservation_requirements.items()
+            key: list(value)
+            for key, value in checkpoint.reservation_requirements.items()
         },
         node_metadata=_clone_node_metadata(checkpoint.node_metadata),
     )
@@ -1337,7 +1380,9 @@ def _project_execution_plan(
             "gas_cost_native": str(gas_cost),
             "resolved_args": resolved_args,
             "projected_output_token": token_out_ref,
-            "projected_output_amount": str(amount_out) if amount_out is not None else None,
+            "projected_output_amount": str(amount_out)
+            if amount_out is not None
+            else None,
         }
 
     return VWSPlanSimulation(valid=True, node_metadata=node_metadata)
@@ -1393,7 +1438,9 @@ def simulate_many_execution_plans(
                 label=_simulation_label(plan),
                 simulation=simulation,
                 final_balances=dict(simulation.ending_balances),
-                per_step_state_transitions=_clone_node_metadata(simulation.node_metadata),
+                per_step_state_transitions=_clone_node_metadata(
+                    simulation.node_metadata
+                ),
                 total_gas_cost_native=sum(gas_cost_by_step.values(), Decimal("0")),
                 gas_cost_by_step=gas_cost_by_step,
                 latency_estimate_seconds=_latency_estimate_seconds(

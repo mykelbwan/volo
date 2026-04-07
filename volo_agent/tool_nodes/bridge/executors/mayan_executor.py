@@ -10,6 +10,7 @@ from web3.types import TxParams
 
 from core.routing.models import BridgeRouteQuote
 from core.utils.errors import NonRetryableError
+from core.utils.http import async_request_json
 
 _LOGGER = logging.getLogger("volo.bridge.mayan")
 _DEFAULT_SWAP_API = "https://swap-api.mayan.finance/v3"
@@ -20,11 +21,6 @@ _QUOTE_MAX_AGE_SECONDS: float = 100.0
 _GAS_FALLBACK: int = 300_000
 _GAS_BUFFER: float = 1.2
 _BROADCAST_TIMEOUT: int = 120
-
-# ---------------------------------------------------------------------------
-# Result dataclass
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class MayanBridgeResult:
@@ -54,7 +50,7 @@ async def _await_mayan_receipt(w3: Any, tx_hash: str) -> None:
 
 
 async def _fetch_swap_transaction_async(
-    quote_hash: str,
+    quote_id: str,
     from_address: str,
     to_address: str,
     slippage: float,
@@ -62,17 +58,20 @@ async def _fetch_swap_transaction_async(
 ) -> Dict[str, Any]:
     url = f"{_swap_api_base()}/swap/trx/"
     params = {
-        "quoteHash": quote_hash,
+        "quoteId": quote_id,
         "fromAddress": from_address,
         "toAddress": to_address,
         "slippage": slippage,
     }
 
     try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(url, params=params)
+        resp = await async_request_json(
+            "GET",
+            url,
+            params=params,
+            timeout=timeout,
+            service="mayan-swap-trx",
+        )
     except Exception as exc:
         err = str(exc).lower()
         if "timeout" in err:
@@ -104,6 +103,7 @@ async def _fetch_swap_transaction_async(
     except Exception:
         raise RuntimeError("Mayan returned an unreadable response. Please try again.")
 
+
 async def _execute_evm_to_solana(
     quote: BridgeRouteQuote,
     sub_org_id: str,
@@ -128,19 +128,18 @@ async def _execute_evm_to_solana(
     from wallet_service.evm.sign_tx import sign_transaction_async
 
     tool_data: Dict[str, Any] = quote.tool_data or {}
-    quote_hash: str = tool_data.get("quoteHash", "")
+    quote_id: str = str(tool_data.get("quoteId", "")).strip()
     route_type: str = tool_data.get("routeType", "WH")
     from_token: str = tool_data.get("fromToken", "")
 
-    if not quote_hash:
+    if not quote_id:
         raise NonRetryableError(
             "The bridge quote is missing required information. Please try again."
         )
 
-    # ── Fetch unsigned EVM transaction from Mayan ─────────────────────────
-    _LOGGER.info("[mayan] fetching EVM transaction for quoteHash=%s", quote_hash[:16])
+    _LOGGER.info("[mayan] fetching EVM transaction for quoteId=%s", quote_id[:16])
     tx_data = await _fetch_swap_transaction_async(
-        quote_hash=quote_hash,
+        quote_id=quote_id,
         from_address=sender,
         to_address=solana_recipient,
         slippage=slippage,
@@ -161,8 +160,6 @@ async def _execute_evm_to_solana(
     chain_id = safe_int(chain_id_raw, quote.source_chain_id)
     value_wei = safe_int(value_raw)
     gas_limit = safe_int(gas_limit_raw, _GAS_FALLBACK)
-
-    # ── Connect to source chain ───────────────────────────────────────────
     chain = get_chain_by_id(chain_id)
     try:
         w3 = make_async_web3(chain.rpc_url)
@@ -177,7 +174,6 @@ async def _execute_evm_to_solana(
     gas_price = await async_get_gas_price(w3, chain_id=chain_id)
     max_fee, max_priority = to_eip1559_fees(gas_price)
 
-    # ── Approve if needed (ERC-20 tokens only) ────────────────────────────
     _ZERO = "0x0000000000000000000000000000000000000000"
     approve_hash: Optional[str] = None
     is_native = from_token.lower() == _ZERO.lower() or not from_token
@@ -230,7 +226,6 @@ async def _execute_evm_to_solana(
                 ) from exc
             await _await_mayan_receipt(w3, approve_hash)
 
-    # ── Estimate gas if not provided ──────────────────────────────────────
     if not gas_limit_raw:
         try:
             estimate = await w3.eth.estimate_gas(
@@ -248,7 +243,6 @@ async def _execute_evm_to_solana(
         except Exception:
             gas_limit = _GAS_FALLBACK
 
-    # ── Build, sign, and broadcast the bridge transaction ─────────────────
     nonce = await nonce_manager.allocate_safe(checksum_sender, chain_id, w3)
 
     bridge_tx: TxParams = {
@@ -308,26 +302,25 @@ async def _execute_solana_to_evm(
     from wallet_service.solana.sign_tx import sign_transaction_async as solana_sign
 
     tool_data: Dict[str, Any] = quote.tool_data or {}
-    quote_hash: str = tool_data.get("quoteHash", "")
+    quote_id: str = str(tool_data.get("quoteId", "")).strip()
     route_type: str = tool_data.get("routeType", "WH")
 
-    if not quote_hash:
+    if not quote_id:
         raise NonRetryableError(
             "The bridge quote is missing required information. Please try again."
         )
 
     _LOGGER.info(
-        "[mayan] fetching Solana transaction for quoteHash=%s", quote_hash[:16]
+        "[mayan] fetching Solana transaction for quoteId=%s", quote_id[:16]
     )
     tx_data = await _fetch_swap_transaction_async(
-        quote_hash=quote_hash,
+        quote_id=quote_id,
         from_address=solana_sender,
         to_address=evm_recipient,
         slippage=slippage,
         timeout=15.0,
     )
 
-    # Mayan returns a base64 encoded VersionedTransaction for Solana source.
     swap_transaction: Optional[str] = (
         tx_data.get("transaction")
         or tx_data.get("swapTransaction")
@@ -339,12 +332,10 @@ async def _execute_solana_to_evm(
             "Mayan didn't return a valid Solana transaction. Please try again."
         )
 
-    # Sign via CDP Solana wallet.
     try:
         signed_tx = await solana_sign(
             sub_org_id, swap_transaction, sign_with=solana_sender
         )
-        # Broadcast via CDP — use mainnet (devnet not supported for live bridges).
         network = "solana"
         signature = await send_solana_transaction_async(signed_tx, network=network)
     except Exception as exc:
@@ -371,12 +362,6 @@ async def _execute_solana_to_evm(
         recipient=evm_recipient,
         status="pending",
     )
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
 
 async def execute_mayan_bridge(
     quote: BridgeRouteQuote,

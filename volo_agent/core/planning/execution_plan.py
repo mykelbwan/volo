@@ -21,12 +21,6 @@ class PlanNode(BaseModel):
     retry_policy: Dict[str, Any] = Field(
         default_factory=lambda: {"max_retries": 3, "backoff_factor": 2.0}
     )
-    # Routing metadata set by route_planner_node.
-    # Holds the selected aggregator, pre-fetched quote, calldata, and any
-    # other protocol-specific execution data.  Kept separate from ``args``
-    # so tool schemas (SwapArgs, BridgeArgs, etc.) stay clean and unchanged.
-    # The executor reads ``metadata["route"]`` before deciding how to invoke
-    # the tool, injecting the pre-built calldata fast-path when available.
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -54,10 +48,6 @@ class ExecutionState(BaseModel):
     completed: bool = False
 
     def merge(self, other: "ExecutionState") -> "ExecutionState":
-        """
-        Deterministically merges another execution state into this one.
-        Treats this object as immutable and returns a new merged one.
-        """
         new_node_states = self.node_states.copy()
         new_node_states.update(other.node_states)
 
@@ -82,9 +72,6 @@ CandidatePlanSet = List[ExecutionPlan]
 
 
 def get_ready_nodes(plan: ExecutionPlan, state: ExecutionState) -> List[PlanNode]:
-    """
-    Returns nodes where state.status == PENDING and all dependencies have SUCCESS status.
-    """
     ready_nodes = []
     for node_id, node in plan.nodes.items():
         node_state = state.node_states.get(node_id)
@@ -113,7 +100,6 @@ def create_node_running_state(node_id: str) -> ExecutionState:
 
 
 def create_node_success_state(node_id: str, result: Dict[str, Any]) -> ExecutionState:
-    """Returns a state delta marking a node as SUCCESS."""
     return ExecutionState(
         node_states={
             node_id: NodeState(
@@ -124,7 +110,6 @@ def create_node_success_state(node_id: str, result: Dict[str, Any]) -> Execution
 
 
 def create_node_reset_state(node_id: str) -> ExecutionState:
-    """Returns a state delta marking a node as PENDING (reset)."""
     return ExecutionState(
         node_states={
             node_id: NodeState(
@@ -146,7 +131,6 @@ def create_node_failure_state(
     user_message: Optional[str] = None,
     mutated_args: Optional[Dict[str, Any]] = None,
 ) -> ExecutionState:
-    """Returns a state delta marking a node as FAILED."""
     return ExecutionState(
         node_states={
             node_id: NodeState(
@@ -163,7 +147,6 @@ def create_node_failure_state(
 
 
 def check_plan_complete(plan: ExecutionPlan, state: ExecutionState) -> bool:
-    """Return True if all nodes are SUCCESS or SKIPPED."""
     for node_id in plan.nodes:
         node_state = state.node_states.get(node_id)
         if not node_state or node_state.status not in [
@@ -197,11 +180,6 @@ def resolve_dynamic_args(
     state: ExecutionState,
     context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Pure function: Takes a dictionary of arguments and returns a NEW one
-    where markers are resolved based on the current execution state and
-    optional session context (database values).
-    """
     from intent_hub.utils.amount import to_wei
 
     def _extract_amount(result: Dict[str, Any]) -> float | None:
@@ -271,7 +249,6 @@ def resolve_dynamic_args(
             return value
         return None
 
-    # 1. Resolve Sequential Markers (from previous node results)
     total_available: float | None = None
     has_any_success = any(
         s.status == StepStatus.SUCCESS for s in state.node_states.values()
@@ -284,7 +261,6 @@ def resolve_dynamic_args(
         if not isinstance(arg_val, str):
             continue
 
-        # ── Pass 1: Resolve Execution Markers ({{OUTPUT_OF:step_X}}) ────────
         if "{{OUTPUT_OF:" in arg_val:
             start = arg_val.find("{{OUTPUT_OF:")
             end = arg_val.find("}}", start)
@@ -335,7 +311,6 @@ def resolve_dynamic_args(
                         else:
                             resolved_args[arg_key] = balance
 
-        # ── Pass 2: Resolve Execution Markers ({{TOTAL_BALANCE}}, etc.) ──────
         if (
             "{{SUM_FROM_PREVIOUS}}" in arg_val or "{{TOTAL_BALANCE}}" in arg_val
         ) and has_any_success:
@@ -359,7 +334,6 @@ def resolve_dynamic_args(
                 else:
                     resolved_args[arg_key] = total_available
 
-        # ── Pass 3: Resolve Session Markers ({{SUB_ORG_ID}}, etc.) ────────────
         if normalized_context:
             # We look for markers that match keys in the context (uppercase)
             for ctx_key, ctx_val in normalized_context.items():

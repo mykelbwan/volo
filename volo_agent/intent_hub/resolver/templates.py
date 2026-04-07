@@ -68,10 +68,6 @@ def _refresh_status(intent: Intent) -> None:
 
 
 def apply_templates(intents: List[Intent]) -> List[Intent]:
-    """
-    Apply deterministic intent-to-plan templates for common multi-step flows.
-    This fills missing slots using prior intent outputs when safe.
-    """
     patched = [intent.model_copy(deep=True) for intent in intents]
     for intent in patched:
         _refresh_status(intent)
@@ -175,9 +171,6 @@ def apply_templates(intents: List[Intent]) -> List[Intent]:
 
 
 def can_apply_templates(intent_dicts: List[dict]) -> bool:
-    """
-    Return True if applying templates would result in all intents complete.
-    """
     intents = [Intent(**data) for data in intent_dicts]
     patched = apply_templates(intents)
     return all(intent.status == IntentStatus.COMPLETE for intent in patched)
