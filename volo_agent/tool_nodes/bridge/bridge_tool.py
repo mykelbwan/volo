@@ -65,11 +65,15 @@ _LOGGER = logging.getLogger("volo.bridge")
 
 if TYPE_CHECKING:
     from tool_nodes.bridge.executors.across_executor import AcrossBridgeResult
+    from tool_nodes.bridge.executors.lifi_executor import LiFiBridgeResult
+    from tool_nodes.bridge.executors.mayan_executor import MayanBridgeResult
     from tool_nodes.bridge.executors.relay_executor import RelayBridgeResult
 
 SimulationResult = (
     AcrossBridgeQuote | RelayBridgeQuote | AcrossSimulationError | RelaySimulationError
 )
+ExecutionQuote = AcrossBridgeQuote | RelayBridgeQuote | BridgeRouteQuote
+
 
 def _get_env_float(key: str, default: float) -> float:
     raw = str(os.getenv(key, "")).strip()
@@ -96,6 +100,7 @@ _EXECUTE_ACROSS_BRIDGE_FN: Any | None = None
 _EXECUTE_MAYAN_BRIDGE_FN: Any | None = None
 _EXECUTE_LIFI_BRIDGE_FN: Any | None = None
 _EXECUTE_RELAY_BRIDGE_FN: Any | None = None
+_LIFI_AGGREGATOR: Any | None = None
 _MAYAN_AGGREGATOR: Any | None = None
 
 
@@ -141,6 +146,15 @@ async def execute_relay_bridge(*args: Any, **kwargs: Any) -> Any:
 
         _EXECUTE_RELAY_BRIDGE_FN = _execute_relay_bridge_impl
     return await _EXECUTE_RELAY_BRIDGE_FN(*args, **kwargs)
+
+
+def _get_lifi_aggregator() -> Any:
+    global _LIFI_AGGREGATOR
+    if _LIFI_AGGREGATOR is None:
+        from core.routing.bridge.lifi import LiFiAggregator
+
+        _LIFI_AGGREGATOR = LiFiAggregator()
+    return _LIFI_AGGREGATOR
 
 
 def _get_mayan_aggregator() -> Any:
@@ -238,6 +252,24 @@ def _bridge_quote_from_route_meta(route_meta: Dict[str, Any]) -> Any | None:
             input_amount=Decimal("0"),
             output_amount=safe_decimal(route_meta.get("output_amount")) or Decimal("0"),
             total_fee=Decimal("0"),
+            total_fee_pct=safe_decimal(route_meta.get("total_fee_pct")) or Decimal("0"),
+            estimated_fill_time_seconds=int(route_meta.get("fill_time_seconds") or 0),
+            gas_cost_source=None,
+            calldata=route_meta.get("calldata"),
+            to=route_meta.get("to"),
+            tool_data=tool_data,
+        )
+    if aggregator == "lifi" and isinstance(tool_data, dict):
+        return BridgeRouteQuote(
+            aggregator="lifi",
+            token_symbol=str(route_meta.get("token_symbol") or ""),
+            source_chain_id=int(str(route_meta.get("source_chain_id"))),
+            dest_chain_id=int(str(route_meta.get("dest_chain_id"))),
+            source_chain_name=str(route_meta.get("source_chain") or ""),
+            dest_chain_name=str(route_meta.get("target_chain") or ""),
+            input_amount=safe_decimal(route_meta.get("input_amount")) or Decimal("0"),
+            output_amount=safe_decimal(route_meta.get("output_amount")) or Decimal("0"),
+            total_fee=safe_decimal(route_meta.get("total_fee")) or Decimal("0"),
             total_fee_pct=safe_decimal(route_meta.get("total_fee_pct")) or Decimal("0"),
             estimated_fill_time_seconds=int(route_meta.get("fill_time_seconds") or 0),
             gas_cost_source=None,
@@ -573,6 +605,47 @@ async def _simulate_dynamic_protocol_async(
         reason="UNSUPPORTED_PROTOCOL",
         message=f"Protocol {protocol.name!r} is not yet implemented.",
     )
+
+
+def _quote_provider(quote: ExecutionQuote) -> str:
+    if isinstance(quote, BridgeRouteQuote):
+        return str(quote.aggregator or "").strip().lower()
+    return str(quote.protocol or "").strip().lower()
+
+
+def _quote_fill_time_seconds(quote: ExecutionQuote) -> int:
+    if isinstance(quote, AcrossBridgeQuote):
+        return max(0, int(quote.avg_fill_time_seconds))
+    if isinstance(quote, RelayBridgeQuote):
+        return max(0, int(quote.avg_fill_time_seconds))
+    return max(0, int(quote.estimated_fill_time_seconds))
+
+
+def _sort_execution_quotes(quotes: list[ExecutionQuote]) -> list[ExecutionQuote]:
+    # Neutral ordering: output first, then faster ETA, then provider key.
+    return sorted(
+        quotes,
+        key=lambda q: (-q.output_amount, _quote_fill_time_seconds(q), _quote_provider(q)),
+    )
+
+
+def _bridge_route_meta_from_quote(quote: BridgeRouteQuote) -> Dict[str, Any]:
+    return {
+        "aggregator": quote.aggregator,
+        "token_symbol": quote.token_symbol,
+        "source_chain_id": quote.source_chain_id,
+        "dest_chain_id": quote.dest_chain_id,
+        "source_chain": quote.source_chain_name,
+        "target_chain": quote.dest_chain_name,
+        "input_amount": str(quote.input_amount),
+        "output_amount": str(quote.output_amount),
+        "total_fee": str(quote.total_fee),
+        "total_fee_pct": str(quote.total_fee_pct),
+        "fill_time_seconds": int(quote.estimated_fill_time_seconds),
+        "calldata": quote.calldata,
+        "to": quote.to,
+        "tool_data": quote.tool_data or {},
+    }
 
 
 async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -966,8 +1039,7 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 )
             )
 
-    # Across / Relay are EVM-only — skip them for Solana routes.
-    routes = []
+    routes: list[tuple[BridgeProtocolConfig, BridgeRoute]] = []
     dynamic_route_tuples: list[tuple[BridgeProtocolConfig, BridgeRoute]] = []
     dynamic_routes_task: asyncio.Task[list[BridgeRoute]] | None = None
     gas_price_task: asyncio.Task[Decimal] | None = None
@@ -990,18 +1062,24 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 gas_price_cache.get_gwei(chain_id=source_chain_id)
             )
 
-    # For Solana routes, use Mayan directly (no EVM simulators).
-    # For EVM routes, use existing dynamic protocols (Relay) as usual.
-    dynamic_protocols = (
-        [] if source_is_solana or dest_is_solana else get_dynamic_protocols()
-    )
+    dynamic_protocols = []
+    if not source_is_solana and not dest_is_solana:
+        dynamic_protocols = [
+            protocol for protocol in get_dynamic_protocols() if protocol.name == "relay"
+        ]
 
+    simulation_errors: list[str] = []
     simulation_tasks: list[asyncio.Task[Any]] = []
-    route_decimals = await asyncio.gather(
-        *[_get_route_decimals(route_tuple[1], token_symbol) for route_tuple in routes]
+    route_decimals_results = await asyncio.gather(
+        *[_get_route_decimals(route_tuple[1], token_symbol) for route_tuple in routes],
+        return_exceptions=True,
     )
-    for route_tuple, (input_decimals, output_decimals) in zip(routes, route_decimals):
+    for route_tuple, decimals_result in zip(routes, route_decimals_results):
         route = route_tuple[1]
+        if isinstance(decimals_result, Exception):
+            simulation_errors.append(f"[DECIMALS:{route.protocol}] {decimals_result}")
+            continue
+        input_decimals, output_decimals = decimals_result
         simulation_tasks.append(
             asyncio.create_task(
                 _run_limited_bridge_simulation(
@@ -1043,32 +1121,19 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as exc:
             _LOGGER.warning("across available-routes lookup failed: %s", exc)
 
-    # Check whether we have any source of quotes at all.
-    has_mayan_route = source_is_solana or dest_is_solana
-    if not routes and not dynamic_protocols and not has_mayan_route:
-        await mark_transfer_failed(
-            claim,
-            error=(
-                f"No bridge route found for {token_symbol} "
-                f"from {source_chain_display} to {dest_chain_display}."
-            ),
-        )
-        raise RuntimeError(
-            f"No bridge route found for {token_symbol} "
-            f"from {source_chain_display} to {dest_chain_display}. "
-            "This token/chain pair is not currently supported."
-        )
-
-    dynamic_route_decimals = await asyncio.gather(
+    dynamic_route_decimals_results = await asyncio.gather(
         *[
             _get_route_decimals(route_tuple[1], token_symbol)
             for route_tuple in dynamic_route_tuples
-        ]
+        ],
+        return_exceptions=True,
     )
-    for route_tuple, (input_decimals, output_decimals) in zip(
-        dynamic_route_tuples, dynamic_route_decimals
-    ):
+    for route_tuple, decimals_result in zip(dynamic_route_tuples, dynamic_route_decimals_results):
         route = route_tuple[1]
+        if isinstance(decimals_result, Exception):
+            simulation_errors.append(f"[DECIMALS:{route.protocol}] {decimals_result}")
+            continue
+        input_decimals, output_decimals = decimals_result
         simulation_tasks.append(
             asyncio.create_task(
                 _run_limited_bridge_simulation(
@@ -1086,8 +1151,7 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         )
     simulation_results = await asyncio.gather(*simulation_tasks, return_exceptions=True)
 
-    quotes: list[AcrossBridgeQuote | RelayBridgeQuote] = []
-    simulation_errors: list[str] = []
+    quotes: list[ExecutionQuote] = []
 
     for sim_result in simulation_results:
         if isinstance(sim_result, Exception):
@@ -1110,36 +1174,77 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
             quotes.append(sim_result)
 
-    mayan_quote: Any | None = None
+    aggregator_quote_tasks: list[tuple[str, asyncio.Task[BridgeRouteQuote | None]]] = []
+    lifi_agg = _get_lifi_aggregator()
+    aggregator_quote_tasks.append(
+        (
+            "lifi",
+            asyncio.create_task(
+                lifi_agg.get_quote(
+                    token_symbol=token_symbol,
+                    source_chain_id=source_chain_id,
+                    dest_chain_id=dest_chain_id,
+                    source_chain_name=source_chain_display,
+                    dest_chain_name=dest_chain_display,
+                    amount=amount,
+                    sender=sender,
+                    recipient=recipient,
+                )
+            ),
+        )
+    )
+
+    mayan_agg: Any | None = None
     if source_is_solana or dest_is_solana:
-        try:
-            _mayan_agg = _get_mayan_aggregator()
-            mayan_quote = await _mayan_agg.get_quote(
-                token_symbol=token_symbol,
-                source_chain_id=source_chain_id,
-                dest_chain_id=dest_chain_id,
-                source_chain_name=source_chain_display,
-                dest_chain_name=dest_chain_display,
-                amount=amount,
-                sender=sender,
-                recipient=recipient,
+        mayan_agg = _get_mayan_aggregator()
+        aggregator_quote_tasks.append(
+            (
+                "mayan",
+                asyncio.create_task(
+                    mayan_agg.get_quote(
+                        token_symbol=token_symbol,
+                        source_chain_id=source_chain_id,
+                        dest_chain_id=dest_chain_id,
+                        source_chain_name=source_chain_display,
+                        dest_chain_name=dest_chain_display,
+                        amount=amount,
+                        sender=sender,
+                        recipient=recipient,
+                    )
+                ),
             )
-            if mayan_quote:
+        )
+
+    if aggregator_quote_tasks:
+        aggregator_results = await asyncio.gather(
+            *[task for _, task in aggregator_quote_tasks], return_exceptions=True
+        )
+        for (aggregator_name, _), result in zip(aggregator_quote_tasks, aggregator_results):
+            if isinstance(result, Exception):
+                simulation_errors.append(f"[{aggregator_name}] {result}")
+                _LOGGER.warning("%s quote failed: %s", aggregator_name, result)
+                continue
+            if not isinstance(result, BridgeRouteQuote):
+                if aggregator_name == "mayan" and mayan_agg is not None:
+                    mayan_reason = str(getattr(mayan_agg, "last_error", "") or "").strip()
+                    if mayan_reason:
+                        simulation_errors.append(f"[mayan] {mayan_reason}")
+                continue
+
+            quotes.append(result)
+            if aggregator_name == "mayan":
                 _LOGGER.info(
                     "mayan_quote out=%s fee_pct=%s eta=%ds",
-                    mayan_quote.output_amount,
-                    mayan_quote.total_fee_pct,
-                    mayan_quote.estimated_fill_time_seconds,
+                    result.output_amount,
+                    result.total_fee_pct,
+                    result.estimated_fill_time_seconds,
                 )
-            else:
-                mayan_reason = str(getattr(_mayan_agg, "last_error", "") or "").strip()
-                if mayan_reason:
-                    simulation_errors.append(f"[mayan] {mayan_reason}")
-        except Exception as exc:
-            simulation_errors.append(f"[mayan] {exc}")
-            _LOGGER.warning("mayan quote failed: %s", exc)
 
-    if not quotes and not mayan_quote:
+    if not quotes:
+        if gas_price_task is not None and not gas_price_task.done():
+            gas_price_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await gas_price_task
         error_summary = (
             "; ".join(simulation_errors[:6])
             if simulation_errors
@@ -1157,47 +1262,26 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
         )
 
-    # For Solana routes: Mayan is the only executor.
-    # For EVM routes: prefer Across, fall back to Relay.
-    if mayan_quote:
-        # Mayan wins for Solana routes — use it directly.
-        quotes_sorted: list = []
-        mayan_only = True
-    else:
-        mayan_only = False
-        across_quotes = [q for q in quotes if q.protocol == "across"]
-        relay_quotes = [q for q in quotes if q.protocol == "relay"]
-        primary_quotes: list[AcrossBridgeQuote | RelayBridgeQuote]
-        fallback_quotes: list[AcrossBridgeQuote | RelayBridgeQuote]
-
-        if across_quotes:
-            primary_quotes = sorted(
-                across_quotes, key=lambda q: q.output_amount, reverse=True
-            )
-            fallback_quotes = sorted(
-                relay_quotes, key=lambda q: q.output_amount, reverse=True
-            )
-        else:
-            primary_quotes = sorted(
-                relay_quotes, key=lambda q: q.output_amount, reverse=True
-            )
-            fallback_quotes = []
-
-        quotes_sorted = primary_quotes + fallback_quotes
+    quotes_sorted = _sort_execution_quotes(quotes)
     fallback_reason: str | None = None
-    used_quote: AcrossBridgeQuote | RelayBridgeQuote | None = None
-    exec_result: AcrossBridgeResult | RelayBridgeResult | None = None
+    used_quote: ExecutionQuote | None = None
+    exec_result: (
+        AcrossBridgeResult | RelayBridgeResult | LiFiBridgeResult | MayanBridgeResult | None
+    ) = None
     execution_errors: list[str] = []
     estimated_fill_time: str | None = None
     approve_hash: str | None = None
     bridge_status: str | None = None
     relay_fees: dict | None = None
-    request_id: str | None = None
+    relay_request_id: str | None = None
     tx_hashes: list[str] | None = None
     relay_status: str | None = None
+    lifi_bridge_name: str | None = None
+    lifi_from_chain_id: int | None = None
+    lifi_to_chain_id: int | None = None
 
     gas_price_gwei: float | None = None
-    if not mayan_only and any(q.protocol == "across" for q in quotes_sorted):
+    if any(_quote_provider(q) == "across" for q in quotes_sorted):
         if gas_price_task is None:
             gas_price_task = asyncio.create_task(
                 gas_price_cache.get_gwei(chain_id=source_chain_id)
@@ -1209,9 +1293,9 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             await gas_price_task
 
     async def _execute_quote(
-        quote: AcrossBridgeQuote | RelayBridgeQuote,
+        quote: ExecutionQuote,
     ) -> tuple[
-        AcrossBridgeResult | RelayBridgeResult,
+        AcrossBridgeResult | RelayBridgeResult | LiFiBridgeResult | MayanBridgeResult,
         str,
         str | None,
         str | None,
@@ -1219,11 +1303,16 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         Optional[str],
         Optional[list[str]],
         Optional[str],
+        Optional[str],
+        Optional[int],
+        Optional[int],
     ]:
-        if quote.protocol == "across":
+        provider = _quote_provider(quote)
+        if provider == "across":
+            across_quote = cast(AcrossBridgeQuote, quote)
             async with wallet_lock(sender, source_chain_id):
                 across_result = await execute_across_bridge(
-                    quote,
+                    across_quote,
                     sub_org_id,
                     sender,
                     recipient,
@@ -1238,8 +1327,11 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
             )
-        if quote.protocol == "relay":
+        if provider == "relay":
             relay_quote = cast(RelayBridgeQuote, quote)
             async with wallet_lock(sender, source_chain_id):
                 relay_result = await execute_relay_bridge(
@@ -1258,72 +1350,103 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 relay_result.request_id,
                 relay_result.tx_hashes,
                 relay_result.relay_status,
+                None,
+                None,
+                None,
+            )
+        if provider == "mayan":
+            mayan_quote = cast(BridgeRouteQuote, quote)
+            if source_is_solana:
+                mayan_result = await execute_mayan_bridge(
+                    quote=mayan_quote,
+                    sub_org_id=sub_org_id,
+                    sender=sender,
+                    recipient=recipient,
+                )
+            else:
+                async with wallet_lock(sender, source_chain_id):
+                    mayan_result = await execute_mayan_bridge(
+                        quote=mayan_quote,
+                        sub_org_id=sub_org_id,
+                        sender=sender,
+                        recipient=recipient,
+                    )
+            return (
+                mayan_result,
+                format_fill_time(mayan_quote.estimated_fill_time_seconds),
+                mayan_result.approve_hash,
+                mayan_result.status,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        if provider == "lifi":
+            lifi_quote = cast(BridgeRouteQuote, quote)
+            lifi_route_meta = _bridge_route_meta_from_quote(lifi_quote)
+            output_amount = lifi_quote.output_amount if lifi_quote.output_amount > 0 else amount
+            if source_is_solana:
+                lifi_result = await execute_lifi_bridge(
+                    route_meta=lifi_route_meta,
+                    token_symbol=token_symbol,
+                    source_chain_id=source_chain_id,
+                    dest_chain_id=dest_chain_id,
+                    source_chain_name=source_chain_display,
+                    dest_chain_name=dest_chain_display,
+                    input_amount=amount,
+                    output_amount=output_amount,
+                    sub_org_id=sub_org_id,
+                    sender=sender,
+                    recipient=recipient,
+                    solana_network=str(source_chain_name).strip().lower(),
+                )
+            else:
+                async with wallet_lock(sender, source_chain_id):
+                    lifi_result = await execute_lifi_bridge(
+                        route_meta=lifi_route_meta,
+                        token_symbol=token_symbol,
+                        source_chain_id=source_chain_id,
+                        dest_chain_id=dest_chain_id,
+                        source_chain_name=source_chain_display,
+                        dest_chain_name=dest_chain_display,
+                        input_amount=amount,
+                        output_amount=output_amount,
+                        sub_org_id=sub_org_id,
+                        sender=sender,
+                        recipient=recipient,
+                    )
+            return (
+                lifi_result,
+                format_fill_time(lifi_quote.estimated_fill_time_seconds),
+                lifi_result.approve_hash,
+                lifi_result.status,
+                None,
+                None,
+                None,
+                None,
+                lifi_result.bridge,
+                lifi_result.from_chain_id,
+                lifi_result.to_chain_id,
             )
         await mark_transfer_failed(
             claim,
-            error=f"Executor for protocol {quote.protocol!r} is not yet implemented.",
+            error=f"Executor for protocol {provider!r} is not yet implemented.",
         )
         raise RuntimeError(
-            f"Executor for protocol {quote.protocol!r} is not yet implemented."
-        )
-
-    # ── 6b. Execute Mayan for Solana routes ──────────────────────────────────
-    if mayan_only and mayan_quote:
-        try:
-            mayan_result = await execute_mayan_bridge(
-                quote=mayan_quote,
-                sub_org_id=sub_org_id,
-                sender=sender,
-                recipient=recipient,
-            )
-        except NonRetryableError:
-            raise
-        except Exception as exc:
-            await mark_transfer_failed(claim, error=str(exc))
-            raise RuntimeError(
-                format_with_recovery(
-                    f"The Solana bridge didn't go through ({exc})",
-                    "retry in a moment; if it keeps failing, request a fresh quote",
-                )
-            ) from exc
-
-        fill_time = format_fill_time(mayan_quote.estimated_fill_time_seconds)
-        msg = (
-            f"Bridge started! Sending {mayan_result.input_amount} "
-            f"{mayan_result.token_symbol} from {mayan_result.source_chain_name} "
-            f"to {mayan_result.dest_chain_name} via Mayan ({mayan_result.route_type}). "
-            f"Estimated time: {fill_time}."
-        )
-        return await _store_bridge_response(
-            {
-                "status": "pending",
-                "tx_hash": mayan_result.tx_hash,
-                "approve_hash": mayan_result.approve_hash,
-                "protocol": "mayan",
-                "token_symbol": mayan_result.token_symbol,
-                "input_amount": str(mayan_result.input_amount),
-                "output_amount": str(mayan_result.output_amount),
-                "total_fee": str(mayan_quote.total_fee),
-                "total_fee_pct": str(mayan_quote.total_fee_pct),
-                "source_chain": mayan_result.source_chain_name,
-                "dest_chain": mayan_result.dest_chain_name,
-                "recipient": mayan_result.recipient,
-                "estimated_fill_time": fill_time,
-                "bridge_status": "pending",
-                "fallback_used": False,
-                "fallback_reason": None,
-                "route_meta_used": False,
-                "message": msg,
-            }
+            f"Executor for protocol {provider!r} is not yet implemented."
         )
 
     primary_error: str | None = None
     for idx, quote in enumerate(quotes_sorted):
+        provider = _quote_provider(quote)
         try:
             if idx > 0:
                 enforce_fallback_policy(
                     policy=fallback_policy,
-                    detail=f"primary bridge execution failed; attempting {quote.protocol}",
+                    detail=f"primary bridge execution failed; attempting {provider}",
                 )
             (
                 exec_result,
@@ -1331,9 +1454,12 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 approve_hash,
                 bridge_status,
                 relay_fees,
-                request_id,
+                relay_request_id,
                 tx_hashes,
                 relay_status,
+                lifi_bridge_name,
+                lifi_from_chain_id,
+                lifi_to_chain_id,
             ) = await _execute_quote(quote)
             used_quote = quote
             if idx > 0 and primary_error:
@@ -1342,7 +1468,7 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         except NonRetryableError:
             raise
         except Exception as exc:
-            err_str = f"{quote.protocol}: {exc}"
+            err_str = f"{provider}: {exc}"
             execution_errors.append(err_str)
             if idx == 0:
                 primary_error = err_str
@@ -1424,9 +1550,15 @@ async def bridge_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         response["relay_status"] = relay_status
     if relay_fees is not None:
         response["relay_fees"] = relay_fees
-    if request_id is not None:
-        response["relay_request_id"] = request_id
+    if relay_request_id is not None:
+        response["relay_request_id"] = relay_request_id
     if tx_hashes is not None:
         response["tx_hashes"] = tx_hashes
+    if lifi_bridge_name is not None:
+        response["bridge"] = lifi_bridge_name
+    if lifi_from_chain_id is not None:
+        response["from_chain_id"] = lifi_from_chain_id
+    if lifi_to_chain_id is not None:
+        response["to_chain_id"] = lifi_to_chain_id
 
     return await _store_bridge_response(response)

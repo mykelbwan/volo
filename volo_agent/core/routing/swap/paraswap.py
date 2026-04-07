@@ -306,6 +306,7 @@ class ParaSwapAggregator(SwapAggregator):
         # ── Phase 2: build transaction calldata ───────────────────────────
         calldata: Optional[str] = None
         to_address: Optional[str] = None
+        tx_data: Dict[str, Any] | None = None
 
         try:
             tx_data = await _fetch_transaction(
@@ -329,6 +330,10 @@ class ParaSwapAggregator(SwapAggregator):
         except Exception as exc:
             self._log_failure("transaction build unexpected error", exc)
 
+        raw_payload: Dict[str, Any] = dict(prices_data)
+        if isinstance(tx_data, dict) and tx_data:
+            raw_payload["transaction"] = tx_data
+
         self._log_debug(
             f"quote ok chain={chain_id} out={amount_out:.6f} "
             f"impact={price_impact_pct:.4f}% gas={gas_estimate} "
@@ -349,5 +354,5 @@ class ParaSwapAggregator(SwapAggregator):
             calldata=calldata,
             to=to_address,
             approval_address=approval_address,
-            raw=prices_data,
+            raw=raw_payload,
         )

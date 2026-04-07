@@ -18,7 +18,7 @@ from config.abi import (
     UNISWAP_V3_ROUTER_ABI,
     WETH_MINIMAL_ABI,
 )
-from config.chains import get_chain_by_id
+from config.chains import get_chain_by_id, get_chain_by_name
 from core.chain_capabilities import get_router_capabilities, set_router_capabilities
 from core.utils.errors import NonRetryableError
 from core.utils.evm_async import (
@@ -51,6 +51,8 @@ _APPROVE_GAS_FALLBACK = 100_000
 _APPROVE_GAS_BUFFER = 1.2
 _SWAP_GAS_BUFFER = 1.2
 _SWAP_GAS_FALLBACK_EXTRA = 50_000
+# Keep 1inch disabled until API/KYC is ready.
+_PRECOMPUTED_SWAP_ALLOWLIST = frozenset({"0x", "paraswap"})
 
 # The zero address — used to identify native token swaps.
 _NATIVE = "0x0000000000000000000000000000000000000000"
@@ -91,6 +93,42 @@ def _supports_native_swaps(chain, override: bool | None = None) -> bool:
     if override is not None:
         return bool(override)
     return bool(getattr(chain, "supports_native_swaps", True))
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    raw = str(value).strip()
+    if not raw:
+        return default
+    try:
+        return int(raw, 0)
+    except Exception:
+        try:
+            return int(raw)
+        except Exception:
+            return default
+
+
+def _safe_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
+    if value is None:
+        return default
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return default
+
+
+async def _resolve_erc20_decimals(w3: Any, token_address: str) -> int:
+    try:
+        token_contract = w3.eth.contract(
+            address=w3.to_checksum_address(token_address),
+            abi=ERC20_ABI,
+        )
+        decimals = await token_contract.functions.decimals().call()
+        return int(decimals)
+    except Exception:
+        return 18
 
 
 def _normalize_execution_state(
@@ -746,7 +784,157 @@ async def execute_precomputed_swap_route(
     gas_price_gwei: float = 1.0,
     persist_broadcast: Callable[[SwapResult], Awaitable[None]] | None = None,
 ) -> SwapResult:
-    raise NonRetryableError("Untrusted precomputed transaction data is not allowed")
+    if not isinstance(route_meta, dict) or not route_meta:
+        raise NonRetryableError("Missing planned swap route metadata.")
+
+    aggregator = str(route_meta.get("aggregator") or "").strip().lower()
+    if aggregator not in _PRECOMPUTED_SWAP_ALLOWLIST:
+        raise NonRetryableError(
+            f"Planned {aggregator or 'unknown'} swap routes are not executable."
+        )
+
+    calldata = str(route_meta.get("calldata") or "").strip()
+    to_address = str(route_meta.get("to") or "").strip()
+    if not calldata or not calldata.startswith("0x") or not to_address:
+        raise NonRetryableError(
+            "Planned swap route metadata is missing executable calldata."
+        )
+
+    chain = get_chain_by_name(chain_name)
+    route_chain_id = route_meta.get("chain_id")
+    if route_chain_id is not None and int(route_chain_id) != int(chain.chain_id):
+        raise NonRetryableError(
+            "Planned swap route metadata targets a different chain."
+        )
+
+    route_amount_in = route_meta.get("amount_in")
+    if route_amount_in is not None and _safe_decimal(route_amount_in) != amount_in:
+        raise NonRetryableError(
+            "Planned swap route metadata does not match the requested amount."
+        )
+
+    token_in = str(route_meta.get("token_in") or "").strip() or _NATIVE
+    token_out = str(route_meta.get("token_out") or "").strip() or _NATIVE
+    amount_out_minimum = _safe_decimal(
+        route_meta.get("amount_out_min"),
+        _safe_decimal(
+            route_meta.get("min_output"),
+            _safe_decimal(
+                route_meta.get("expected_output"),
+                _safe_decimal(route_meta.get("amount_out"), Decimal("0")),
+            ),
+        ),
+    )
+
+    execution_meta = route_meta.get("execution")
+    execution = execution_meta if isinstance(execution_meta, dict) else {}
+    value_wei = _safe_int(route_meta.get("value"), _safe_int(execution.get("value"), 0))
+
+    w3 = make_async_web3(chain.rpc_url)
+    checksum_sender = w3.to_checksum_address(sender)
+    checksum_to = w3.to_checksum_address(to_address)
+
+    gas_price = Web3.to_wei(gas_price_gwei, "gwei")
+    max_fee_per_gas, max_priority_fee = to_eip1559_fees(gas_price)
+
+    async with wallet_lock(checksum_sender, chain.chain_id) as execution_lock:
+        nonce_manager = await get_async_nonce_manager()
+
+        approve_hash: str | None = None
+        approval_address = str(route_meta.get("approval_address") or "").strip()
+        if approval_address and token_in.lower() != _NATIVE:
+            decimals_in = _safe_int(route_meta.get("token_in_decimals"), 0)
+            if decimals_in <= 0:
+                decimals_in = _safe_int(execution.get("decimals_in"), 0)
+            if decimals_in <= 0:
+                decimals_in = await _resolve_erc20_decimals(w3, token_in)
+            precomputed_quote = cast(
+                Any,
+                type(
+                    "_PrecomputedQuote",
+                    (),
+                    {
+                        "token_in": token_in,
+                        "amount_in": amount_in,
+                        "decimals_in": decimals_in,
+                    },
+                )(),
+            )
+            approve_hash = await _maybe_approve(
+                w3=w3,
+                quote=precomputed_quote,
+                router_address=approval_address,
+                sub_org_id=sub_org_id,
+                sender=checksum_sender,
+                chain=chain,
+                nonce_manager=nonce_manager,
+                max_fee_per_gas=max_fee_per_gas,
+                gas_price=gas_price,
+                supports_native=_supports_native_swaps(chain),
+                wallet_execution_lock=execution_lock,
+                persist_step_submission=None,
+            )
+
+        nonce = await nonce_manager.allocate_safe(checksum_sender, chain.chain_id, w3)
+        route_gas_estimate = _safe_int(route_meta.get("gas_estimate"), 0)
+        if route_gas_estimate > 0:
+            gas_limit = int(route_gas_estimate * _SWAP_GAS_BUFFER) + _SWAP_GAS_FALLBACK_EXTRA
+        else:
+            try:
+                estimate = await w3.eth.estimate_gas(
+                    cast(
+                        TxParams,
+                        {
+                            "from": checksum_sender,
+                            "to": checksum_to,
+                            "value": value_wei,
+                            "data": calldata,
+                        },
+                    )
+                )
+                gas_limit = int(estimate * _SWAP_GAS_BUFFER)
+            except Exception:
+                gas_limit = 350_000
+
+        unsigned_tx: TxParams = {
+            "to": checksum_to,
+            "data": calldata,
+            "value": value_wei,  # type: ignore[typeddict-item]
+            "nonce": nonce,
+            "gas": gas_limit,
+            "maxFeePerGas": max_fee_per_gas,
+            "maxPriorityFeePerGas": max_priority_fee,
+            "chainId": chain.chain_id,
+            "type": "0x2",
+        }
+        signed_tx = await sign_transaction_async(sub_org_id, unsigned_tx, checksum_sender)
+
+        await execution_lock.ensure_held()
+        try:
+            tx_hash = await async_broadcast_evm(w3, signed_tx)
+        except Exception as exc:
+            await reset_on_error_async(exc, checksum_sender, chain.chain_id, w3)
+            raise RuntimeError(
+                "We couldn't broadcast the planned swap transaction. "
+                "Please try again in a moment."
+            ) from exc
+
+        result = SwapResult(
+            tx_hash=tx_hash,
+            approve_hash=approve_hash,
+            token_in=token_in,
+            token_out=token_out,
+            amount_in=amount_in,
+            amount_out_minimum=amount_out_minimum,
+            chain_id=chain.chain_id,
+            chain_name=chain.name,
+            protocol=aggregator,
+            router=checksum_to,
+        )
+        if persist_broadcast is not None:
+            await persist_broadcast(result)
+        await async_await_evm_receipt(w3, tx_hash, timeout=120)
+        return result
 
 
 async def execute_swap(

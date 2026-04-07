@@ -16,6 +16,8 @@ _ROUTE_TTL_SECONDS = {
     "bridge": 45,
     "solana_swap": 30,
 }
+# Keep 1inch disabled until API/KYC is ready.
+_TRUSTED_SWAP_CALLDATA_AGGREGATORS = frozenset({"0x", "paraswap"})
 
 
 class RouteMetaValidationError(ValueError):
@@ -483,7 +485,8 @@ def _legacy_validation_result(
 
 def _legacy_swap_route_supported(route_meta: Dict[str, Any]) -> bool:
     if route_meta.get("calldata") and route_meta.get("to"):
-        return True
+        aggregator = str(route_meta.get("aggregator") or "").strip().lower()
+        return aggregator in _TRUSTED_SWAP_CALLDATA_AGGREGATORS
     execution = route_meta.get("execution") or {}
     if not isinstance(execution, Mapping):
         return False

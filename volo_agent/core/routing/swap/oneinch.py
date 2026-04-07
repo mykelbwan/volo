@@ -232,6 +232,7 @@ class OneInchAggregator(SwapAggregator):
         calldata: Optional[str] = None
         to_address: Optional[str] = None
         approval_address: Optional[str] = None
+        swap_data: Dict[str, Any] | None = None
 
         try:
             swap_data = await _fetch_swap(
@@ -272,6 +273,12 @@ class OneInchAggregator(SwapAggregator):
         except Exception as exc:
             self._log_failure("swap calldata unexpected error", exc)
 
+        raw_payload: Dict[str, Any] = dict(quote_data)
+        if isinstance(swap_data, dict) and swap_data:
+            tx_obj = swap_data.get("tx")
+            if isinstance(tx_obj, dict) and tx_obj:
+                raw_payload["transaction"] = tx_obj
+
         return SwapRouteQuote(
             aggregator=self.name,
             chain_id=chain_id,
@@ -286,5 +293,5 @@ class OneInchAggregator(SwapAggregator):
             calldata=calldata,
             to=to_address,
             approval_address=approval_address,
-            raw=quote_data,
+            raw=raw_payload,
         )

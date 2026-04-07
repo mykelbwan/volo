@@ -426,7 +426,9 @@ class RoutePlanner:
         chain_id = chain_cfg.chain_id
         chain_name_canonical = chain_cfg.name
 
-        # ── Build coroutines for all sources ──────────────────────────────
+        # ── Build coroutines for external aggregators only ────────────────
+        # Internal V3/V2 execution is intentionally deferred to swap_tool
+        # fallback, so route discovery remains non-blocking and lightweight.
         tasks: List[Tuple[str, Any]] = []  # (source_name, coroutine_or_awaitable)
 
         # External aggregators
@@ -446,48 +448,6 @@ class RoutePlanner:
                         coro,
                         agg.name,
                         agg.TIMEOUT_SECONDS,
-                    ),
-                )
-            )
-
-        # Internal V3 simulator (if supported on this chain)
-        if chain_cfg.v3_quoter and chain_cfg.v3_router:
-            tasks.append(
-                (
-                    "uniswap_v3",
-                    _timed_aggregator_call_with_outcome(
-                        self._run_v3_simulator(
-                            token_in=token_in,
-                            token_out=token_out,
-                            amount_in=float(amount_in),
-                            sender=effective_sender,
-                            slippage_pct=slippage_pct,
-                            chain_name=chain_name_canonical,
-                            chain_id=chain_id,
-                        ),
-                        "uniswap_v3",
-                        _INTERNAL_SIMULATOR_TIMEOUT,
-                    ),
-                )
-            )
-
-        # Internal V2 simulator (if supported on this chain)
-        if chain_cfg.v2_router and chain_cfg.v2_factory:
-            tasks.append(
-                (
-                    "uniswap_v2",
-                    _timed_aggregator_call_with_outcome(
-                        self._run_v2_simulator(
-                            token_in=token_in,
-                            token_out=token_out,
-                            amount_in=float(amount_in),
-                            sender=effective_sender,
-                            slippage_pct=slippage_pct,
-                            chain_name=chain_name_canonical,
-                            chain_id=chain_id,
-                        ),
-                        "uniswap_v2",
-                        _INTERNAL_SIMULATOR_TIMEOUT,
                     ),
                 )
             )

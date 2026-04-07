@@ -96,6 +96,12 @@ def build_swap_route_metadata(
         meta["to"] = quote.to
     if quote.approval_address:
         meta["approval_address"] = quote.approval_address
+    if isinstance(quote.raw, dict):
+        tx_obj = quote.raw.get("transaction")
+        if not isinstance(tx_obj, dict):
+            tx_obj = quote.raw.get("tx")
+        if isinstance(tx_obj, dict) and tx_obj.get("value") not in (None, ""):
+            meta["value"] = tx_obj.get("value")
     return meta
 
 

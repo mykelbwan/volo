@@ -5,7 +5,6 @@ from decimal import Decimal
 from typing import Any, Dict
 
 from config.chains import get_chain_by_name
-from core.routing.route_meta import coerce_fallback_policy, enforce_fallback_policy
 from core.utils.errors import NonRetryableError, categorize_error
 from tool_nodes.common.input_utils import (
     format_with_recovery,
@@ -26,10 +25,13 @@ from wallet_service.common.transfer_idempotency import (
 from wallet_service.evm.gas_price import gas_price_cache
 
 _EXECUTE_SWAP_FN: Any | None = None
+_EXECUTE_PRECOMPUTED_SWAP_ROUTE_FN: Any | None = None
 _SIMULATE_SWAP_V3_FN: Any | None = None
 _SIMULATE_SWAP_V2_FN: Any | None = None
 _SIMULATION_ERROR_V3_CLS: Any | None = None
 _SIMULATION_ERROR_V2_CLS: Any | None = None
+# Keep 1inch disabled until API/KYC is ready.
+_TRUSTED_PRECOMPUTED_SWAP_AGGREGATORS = frozenset({"0x", "paraswap"})
 
 
 async def execute_swap(*args: Any, **kwargs: Any) -> Any:
@@ -39,6 +41,17 @@ async def execute_swap(*args: Any, **kwargs: Any) -> Any:
 
         _EXECUTE_SWAP_FN = _execute_swap_impl
     return await _EXECUTE_SWAP_FN(*args, **kwargs)
+
+
+async def execute_precomputed_swap_route(*args: Any, **kwargs: Any) -> Any:
+    global _EXECUTE_PRECOMPUTED_SWAP_ROUTE_FN
+    if _EXECUTE_PRECOMPUTED_SWAP_ROUTE_FN is None:
+        from tool_nodes.dex.swap_executor import (
+            execute_precomputed_swap_route as _execute_precomputed_swap_route_impl,
+        )
+
+        _EXECUTE_PRECOMPUTED_SWAP_ROUTE_FN = _execute_precomputed_swap_route_impl
+    return await _EXECUTE_PRECOMPUTED_SWAP_ROUTE_FN(*args, **kwargs)
 
 
 async def simulate_swap(*args: Any, **kwargs: Any) -> Any:
@@ -83,10 +96,84 @@ def _is_v2_simulation_error(value: Any) -> bool:
     return isinstance(value, _SIMULATION_ERROR_V2_CLS)
 
 
+def _route_meta_aggregator(route_meta: Any) -> str:
+    if not isinstance(route_meta, dict):
+        return ""
+    return str(route_meta.get("aggregator") or "").strip().lower()
+
+
+def _is_trusted_precomputed_swap_route(route_meta: Any) -> bool:
+    if not isinstance(route_meta, dict):
+        return False
+    aggregator = _route_meta_aggregator(route_meta)
+    if aggregator not in _TRUSTED_PRECOMPUTED_SWAP_AGGREGATORS:
+        return False
+    calldata = str(route_meta.get("calldata") or "").strip()
+    to_address = str(route_meta.get("to") or "").strip()
+    return bool(calldata and calldata.startswith("0x") and to_address)
+
+
+def _route_meta_amount_out(route_meta: Dict[str, Any]) -> Decimal:
+    for key in ("amount_out", "expected_output", "min_output", "amount_out_min"):
+        raw = route_meta.get(key)
+        if raw is None:
+            continue
+        try:
+            return Decimal(str(raw))
+        except Exception:
+            continue
+    return Decimal("0")
+
+
+def _route_meta_amount_out_min(route_meta: Dict[str, Any]) -> Decimal:
+    for key in ("amount_out_min", "min_output", "expected_output", "amount_out"):
+        raw = route_meta.get(key)
+        if raw is None:
+            continue
+        try:
+            return Decimal(str(raw))
+        except Exception:
+            continue
+    return Decimal("0")
+
+
+def _route_meta_path(route_meta: Dict[str, Any], token_in: str, token_out: str) -> list[str]:
+    raw_path = route_meta.get("path")
+    if isinstance(raw_path, list):
+        path = [str(item).strip() for item in raw_path if str(item).strip()]
+        if path:
+            return path
+    return [token_in, token_out]
+
+
+def _route_meta_route_label(route_meta: Dict[str, Any]) -> str:
+    route = str(route_meta.get("route") or "").strip()
+    return route or "aggregated"
+
+
+def _quote_decimal(value: Any, default: Decimal = Decimal("0")) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return default
+
+
+def _internal_quote_sort_key(candidate: tuple[str, Any]) -> tuple[Decimal, Decimal, str]:
+    protocol, quote = candidate
+    amount_out = _quote_decimal(getattr(quote, "amount_out", Decimal("0")))
+    amount_out_min = _quote_decimal(
+        getattr(quote, "amount_out_minimum", amount_out), amount_out
+    )
+    # Best output first, then best minimum output, then deterministic protocol key.
+    return (-amount_out, -amount_out_min, protocol)
+
+
 def _route_meta_contains_untrusted_swap_data(route_meta: Any) -> bool:
     if not isinstance(route_meta, dict):
         return False
-    if route_meta.get("calldata") or route_meta.get("swap_transaction"):
+    if route_meta.get("swap_transaction"):
+        return True
+    if route_meta.get("calldata") and not _is_trusted_precomputed_swap_route(route_meta):
         return True
     return False
 
@@ -103,6 +190,22 @@ def _validate_non_executable_route_meta(
         return
     if _route_meta_contains_untrusted_swap_data(route_meta):
         raise NonRetryableError("Untrusted precomputed transaction data is not allowed")
+    if route_meta.get("calldata"):
+        aggregator = _route_meta_aggregator(route_meta)
+        if aggregator not in _TRUSTED_PRECOMPUTED_SWAP_AGGREGATORS:
+            raise NonRetryableError(
+                format_with_recovery(
+                    f"Planned {aggregator or 'unknown'} calldata routes are not allowed",
+                    "request a fresh route and retry",
+                )
+            )
+        if not str(route_meta.get("to") or "").strip():
+            raise NonRetryableError(
+                format_with_recovery(
+                    "The planned swap route is missing a destination contract",
+                    "request a fresh route and retry",
+                )
+            )
     if str(route_meta.get("token_in") or "").strip().lower() not in {
         "",
         token_in.lower(),
@@ -275,127 +378,173 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         amount_in=amount_in_decimal,
     )
     route_meta_used = bool(isinstance(route_meta, dict) and route_meta)
-    fallback_policy = coerce_fallback_policy(parameters.get("_fallback_policy"))
+    route_meta_aggregator = _route_meta_aggregator(route_meta)
+    has_trusted_precomputed_route = _is_trusted_precomputed_swap_route(route_meta)
 
     try:
-        # ── 3. Simulate — V3 first, fall back to V2 ──────────────────────────────
+        # ── 3. Execute trusted precomputed route first (if available) ────────────
         quote = None
-        v2_quote = None
+        remaining_candidates: list[tuple[str, Any]] = []
         simulation_errors: list[str] = []
         used_protocol = ""
         fallback_reason: str | None = None
 
-        can_parallelize_fallback = bool(
-            fallback_policy.allow_fallback
-            and chain.v3_quoter
-            and chain.v3_router
-            and chain.v2_router
-            and chain.v2_factory
-        )
+        if has_trusted_precomputed_route:
+            precomputed_path = _route_meta_path(route_meta, token_in, token_out)
+            precomputed_route = _route_meta_route_label(route_meta)
+            precomputed_amount_out = _route_meta_amount_out(route_meta)
+            precomputed_amount_out_min = _route_meta_amount_out_min(route_meta)
 
-        if can_parallelize_fallback:
-            v3_result, v2_result = await asyncio.gather(
-                simulate_swap(
-                    token_in=token_in,
-                    token_out=token_out,
+            async def _persist_precomputed_broadcast(result: Any) -> None:
+                await mark_transfer_inflight(
+                    active_claim,
+                    tx_hash=result.tx_hash,
+                    result={
+                        "status": "pending",
+                        "tx_hash": result.tx_hash,
+                        "approve_hash": result.approve_hash,
+                        "protocol": result.protocol,
+                        "route": precomputed_route,
+                        "path": precomputed_path,
+                        "amount_in": str(result.amount_in),
+                        "amount_out": str(precomputed_amount_out),
+                        "amount_out_minimum": str(precomputed_amount_out_min),
+                        "chain": result.chain_name,
+                        "fallback_used": False,
+                        "fallback_reason": None,
+                        "route_meta_used": route_meta_used,
+                        "route_meta_source": route_meta_aggregator,
+                        "request_id": request_id,
+                        "execution_state": {"completion_status": "pending"},
+                        "message": f"Swap submitted. Transaction ID: {result.tx_hash}.",
+                    },
+                )
+
+            gas_price_gwei = float(await gas_price_cache.get_gwei(chain_id=chain.chain_id))
+            try:
+                precomputed_result = await execute_precomputed_swap_route(
+                    route_meta=route_meta,
                     amount_in=amount_in_decimal,
-                    sender=sender,
-                    slippage_pct=slippage,
                     chain_name=chain_name,
-                ),
-                simulate_swap_v2(
-                    token_in=token_in,
-                    token_out=token_out,
-                    amount_in=amount_in_decimal,
+                    sub_org_id=sub_org_id,
                     sender=sender,
-                    slippage_pct=slippage,
-                    chain_name=chain_name,
-                ),
-                return_exceptions=True,
+                    gas_price_gwei=gas_price_gwei,
+                    persist_broadcast=_persist_precomputed_broadcast,
+                )
+                token_in_label = parameters.get("token_in_symbol") or "token"
+                token_out_label = parameters.get("token_out_symbol") or "token"
+                message = (
+                    f"Swap submitted: {precomputed_result.amount_in} "
+                    f"{token_in_label} to {token_out_label}."
+                )
+                if precomputed_result.tx_hash:
+                    message += f" Transaction ID: {precomputed_result.tx_hash}."
+
+                response = {
+                    "status": "success",
+                    "tx_hash": precomputed_result.tx_hash,
+                    "approve_hash": precomputed_result.approve_hash,
+                    "protocol": precomputed_result.protocol,
+                    "route": precomputed_route,
+                    "path": precomputed_path,
+                    "amount_in": str(precomputed_result.amount_in),
+                    "amount_out": str(precomputed_amount_out),
+                    "amount_out_minimum": str(
+                        precomputed_amount_out_min
+                        if precomputed_amount_out_min > 0
+                        else precomputed_result.amount_out_minimum
+                    ),
+                    "chain": precomputed_result.chain_name,
+                    "fallback_used": False,
+                    "fallback_reason": None,
+                    "route_meta_used": route_meta_used,
+                    "route_meta_source": route_meta_aggregator,
+                    "request_id": request_id,
+                    "execution_state": {"completion_status": "completed"},
+                    "message": message,
+                }
+                await mark_transfer_success(
+                    active_claim,
+                    tx_hash=precomputed_result.tx_hash,
+                    result=response,
+                )
+                return response
+            except Exception as exc:
+                fallback_reason = (
+                    f"{route_meta_aggregator or 'precomputed'} execution failed "
+                    f"({categorize_error(exc).value}): {exc}"
+                )
+
+        # ── 4. Simulate internal routes — V3 first, then V2 fallback ────────────
+
+        internal_simulation_tasks: list[tuple[str, asyncio.Task[Any]]] = []
+        if chain.v3_quoter and chain.v3_router:
+            internal_simulation_tasks.append(
+                (
+                    "v3",
+                    asyncio.create_task(
+                        simulate_swap(
+                            token_in=token_in,
+                            token_out=token_out,
+                            amount_in=amount_in_decimal,
+                            sender=sender,
+                            slippage_pct=slippage,
+                            chain_name=chain_name,
+                        )
+                    ),
+                )
+            )
+        if chain.v2_router and chain.v2_factory:
+            internal_simulation_tasks.append(
+                (
+                    "v2",
+                    asyncio.create_task(
+                        simulate_swap_v2(
+                            token_in=token_in,
+                            token_out=token_out,
+                            amount_in=amount_in_decimal,
+                            sender=sender,
+                            slippage_pct=slippage,
+                            chain_name=chain_name,
+                        )
+                    ),
+                )
             )
 
-            if isinstance(v3_result, BaseException):
-                simulation_errors.append(f"V3: [UNEXPECTED_ERROR] {v3_result}")
-            elif _is_v3_simulation_error(v3_result):
+        if not internal_simulation_tasks:
+            raise RuntimeError(
+                format_with_recovery(
+                    f"No internal swap simulator is configured for {chain.name}.",
+                    "use a chain with swap support and retry",
+                )
+            )
+
+        internal_results = await asyncio.gather(
+            *[task for _, task in internal_simulation_tasks], return_exceptions=True
+        )
+        candidate_quotes: list[tuple[str, Any]] = []
+        for (protocol, _task), sim_result in zip(internal_simulation_tasks, internal_results):
+            if isinstance(sim_result, BaseException):
                 simulation_errors.append(
-                    f"V3: [{v3_result.reason}] {v3_result.message}"
+                    f"{protocol.upper()}: [UNEXPECTED_ERROR] {sim_result}"
                 )
-            else:
-                quote = v3_result
-                used_protocol = "v3"
+                continue
+            if protocol == "v3" and _is_v3_simulation_error(sim_result):
+                simulation_errors.append(
+                    f"V3: [{sim_result.reason}] {sim_result.message}"
+                )
+                continue
+            if protocol == "v2" and _is_v2_simulation_error(sim_result):
+                simulation_errors.append(
+                    f"V2: [{sim_result.reason}] {sim_result.message}"
+                )
+                continue
+            candidate_quotes.append((protocol, sim_result))
 
-            if quote is None:
-                if simulation_errors:
-                    enforce_fallback_policy(
-                        policy=fallback_policy,
-                        detail="V3 simulation failed; attempting V2 simulation",
-                    )
-                if isinstance(v2_result, BaseException):
-                    simulation_errors.append(f"V2: [UNEXPECTED_ERROR] {v2_result}")
-                elif _is_v2_simulation_error(v2_result):
-                    simulation_errors.append(
-                        f"V2: [{v2_result.reason}] {v2_result.message}"
-                    )
-                else:
-                    quote = v2_result
-                    v2_quote = v2_result
-                    used_protocol = "v2"
-            elif not isinstance(v2_result, BaseException) and not _is_v2_simulation_error(
-                v2_result
-            ):
-                v2_quote = v2_result
-        else:
-            # Try V3
-            if chain.v3_quoter and chain.v3_router:
-                try:
-                    v3_result = await simulate_swap(
-                        token_in=token_in,
-                        token_out=token_out,
-                        amount_in=amount_in_decimal,
-                        sender=sender,
-                        slippage_pct=slippage,
-                        chain_name=chain_name,
-                    )
-                    if _is_v3_simulation_error(v3_result):
-                        simulation_errors.append(
-                            f"V3: [{v3_result.reason}] {v3_result.message}"
-                        )
-                    else:
-                        quote = v3_result
-                        used_protocol = "v3"
-                except Exception as exc:
-                    simulation_errors.append(f"V3: [UNEXPECTED_ERROR] {exc}")
-
-        # Fall back to V2 if V3 gave no result
-        if (
-            quote is None
-            and chain.v2_router
-            and chain.v2_factory
-            and not can_parallelize_fallback
-        ):
-            if simulation_errors:
-                enforce_fallback_policy(
-                    policy=fallback_policy,
-                    detail="V3 simulation failed; attempting V2 simulation",
-                )
-            try:
-                v2_result = await simulate_swap_v2(
-                    token_in=token_in,
-                    token_out=token_out,
-                    amount_in=amount_in_decimal,
-                    sender=sender,
-                    slippage_pct=slippage,
-                    chain_name=chain_name,
-                )
-                if _is_v2_simulation_error(v2_result):
-                    simulation_errors.append(
-                        f"V2: [{v2_result.reason}] {v2_result.message}"
-                    )
-                else:
-                    quote = v2_result
-                    used_protocol = "v2"
-            except Exception as exc:
-                simulation_errors.append(f"V2: [UNEXPECTED_ERROR] {exc}")
+        if candidate_quotes:
+            candidate_quotes.sort(key=_internal_quote_sort_key)
+            used_protocol, quote = candidate_quotes[0]
+            remaining_candidates = candidate_quotes[1:]
 
         if quote is None:
             error_summary = (
@@ -454,7 +603,7 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                     "fallback_used": bool(fallback_reason),
                     "fallback_reason": fallback_reason,
                     "route_meta_used": route_meta_used,
-                    "route_meta_source": str(route_meta.get("aggregator") or ""),
+                    "route_meta_source": route_meta_aggregator,
                     "request_id": request_id,
                     "execution_state": recovered_execution_state,
                     "message": f"Swap submitted. Transaction ID: {result.tx_hash}.",
@@ -498,7 +647,7 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                     "fallback_used": bool(fallback_reason),
                     "fallback_reason": fallback_reason,
                     "route_meta_used": route_meta_used,
-                    "route_meta_source": str(route_meta.get("aggregator") or ""),
+                    "route_meta_source": route_meta_aggregator,
                     "request_id": request_id,
                     "execution_state": recovered_execution_state,
                     "message": "Swap execution resumed from the last confirmed step.",
@@ -523,53 +672,46 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             is_pending_timeout = "pending beyond" in exc_msg or (
                 "pending" in exc_msg and "transaction" in exc_msg
             )
-            can_fallback = (
-                used_protocol == "v3"
-                and not is_pending_timeout
-                and chain.v2_router
-                and chain.v2_factory
-            )
-
-            if not can_fallback:
+            if is_pending_timeout or not remaining_candidates:
                 raise
 
-            enforce_fallback_policy(
-                policy=fallback_policy,
-                detail="V3 execution failed; attempting V2 execution",
-            )
+            primary_protocol = used_protocol
 
-            if v2_quote is None:
-                v2_result = await simulate_swap_v2(
-                    token_in=token_in,
-                    token_out=token_out,
-                    amount_in=amount_in_decimal,
-                    sender=sender,
-                    slippage_pct=slippage,
-                    chain_name=chain_name,
-                )
-                if _is_v2_simulation_error(v2_result):
+            primary_failure = (
+                f"{primary_protocol.upper()} execution failed "
+                f"({categorize_error(exc).value}): {exc}"
+            )
+            fallback_errors: list[str] = []
+            try:
+                for fallback_protocol, fallback_quote in remaining_candidates:
+                    try:
+                        quote_used = fallback_quote
+                        result = await _execute_with_quote(quote_used)
+                        used_protocol = fallback_protocol
+                        fallback_reason = (
+                            f"{fallback_reason}; {primary_failure}"
+                            if fallback_reason
+                            else primary_failure
+                        )
+                        break
+                    except Exception as fallback_exc:
+                        fallback_errors.append(
+                            f"{fallback_protocol.upper()}: {fallback_exc}"
+                        )
+                else:
                     raise RuntimeError(
                         format_with_recovery(
                             (
-                                "V3 execution failed and V2 simulation also failed: "
-                                f"[{v2_result.reason}] {v2_result.message}"
+                                f"{primary_protocol.upper()} execution failed and all "
+                                f"fallback executions failed: {'; '.join(fallback_errors[:4])}"
                             ),
-                            "retry with a smaller amount or higher slippage",
+                            "retry in a moment; if the issue persists, reduce amount",
                         )
-                    ) from exc
-                v2_quote = v2_result
-
-            try:
-                quote_used = v2_quote
-                result = await _execute_with_quote(quote_used)
-                fallback_reason = (
-                    f"V3 execution failed ({categorize_error(exc).value}): {exc}"
-                )
-                used_protocol = "v2"
+                    )
             except Exception:
                 raise RuntimeError(
                     format_with_recovery(
-                        "V3 execution failed and V2 execution failed",
+                        "Swap execution failed on all candidate routes",
                         "retry in a moment; if the issue persists, reduce amount",
                     )
                 ) from exc
@@ -603,7 +745,7 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             "fallback_used": bool(fallback_reason),
             "fallback_reason": fallback_reason,
             "route_meta_used": route_meta_used,
-            "route_meta_source": str(route_meta.get("aggregator") or ""),
+            "route_meta_source": route_meta_aggregator,
             "request_id": request_id,
             "execution_state": {
                 **recovered_execution_state,
