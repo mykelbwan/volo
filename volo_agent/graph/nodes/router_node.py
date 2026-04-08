@@ -47,7 +47,6 @@ from intent_hub.parser.router import route_conversation
 
 logger = logging.getLogger(__name__)
 
-# --- Pre-compiled Regex Patterns ---
 _RE_TOKENS = re.compile(r"[a-z0-9_.:%-]+")
 _RE_NORMALIZE = re.compile(r"[^a-z0-9]+")
 _RE_CANCEL_ID = re.compile(r"cancel\s+(?:task|order|trigger)?\s*([a-z0-9-]{6,})")
@@ -59,7 +58,6 @@ _IDENTITY_SERVICE_CACHE: dict[str, Any] = {}
 
 
 def _get_identity_service_ctx():
-    """Lazy loader for identity service to avoid circular imports and overhead."""
     if not _IDENTITY_SERVICE_CACHE:
         from core.identity.service import (
             LINK_TOKEN_TTL_SECONDS,
@@ -83,7 +81,6 @@ def _get_content_str(content: Any) -> str:
 
 
 def _normalize_text(text: str) -> str:
-    """Standardized text normalization: lowercase and alphanumeric only."""
     if not text:
         return ""
     return _RE_NORMALIZE.sub(" ", text.lower()).strip()
@@ -143,8 +140,6 @@ def _is_explicit_action_request(text: str) -> bool:
 
 def _parse_scope_for_post_completion_action(text: str) -> str:
     tokens = _RE_TOKENS.findall((text or "").lower())
-    # Slot-filling replies are often short ("base", "eth", "0.5", "yes").
-    # Keep only the most recent assistant question and user reply in that case.
     if len(tokens) <= 3 and not _is_explicit_action_request(text):
         return "recent_turn"
     return "last_user"
@@ -196,7 +191,9 @@ def _latest_ai_text(messages: Sequence[BaseMessage] | None) -> str:
     return ""
 
 
-def _latest_human_message(messages: Sequence[BaseMessage] | None) -> HumanMessage | None:
+def _latest_human_message(
+    messages: Sequence[BaseMessage] | None,
+) -> HumanMessage | None:
     if not messages:
         return None
     for message in reversed(messages):

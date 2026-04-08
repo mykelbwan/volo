@@ -208,13 +208,7 @@ tools_registry.register(
 tools_registry.register(
     Tool(
         name="solana_swap",
-        description=(
-            "Swap one token for another on the Solana blockchain. "
-            "Uses Jupiter (the leading Solana DEX aggregator that routes through "
-            "Raydium, Orca, Meteora, and 30+ other sources) or Raydium directly, "
-            "always picking the best available price. "
-            "Use this tool when the user wants to swap tokens on Solana"
-        ),
+        description=("Swap one token for another on the Solana blockchain. "),
         func=_solana_swap_tool,
         on_suggest_fix=_solana_swap_fix,
         args_schema=SolanaSwapArgs,

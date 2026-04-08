@@ -316,10 +316,6 @@ def _needs_existing_user_wallet_refresh(
 
 
 async def onboarding_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Ensures the user is identified and registered before any actions occur.
-    Maps platform identity and provider to wallet configuration.
-    """
     user_id_raw = state.get("user_id")
     user_id = str(user_id_raw).strip() if user_id_raw is not None else ""
     provider_raw = state.get("provider")
@@ -401,7 +397,7 @@ async def onboarding_node(state: AgentState) -> Dict[str, Any]:
     retry_requested = _is_retry_request(last_user_msg)
     link_token = extract_link_token(last_user_msg)
 
-    # 1) If user already exists, continue without prompting.
+    # If user already exists, continue without prompting.
     try:
         existing_user = await user_service.get_user_by_identity(provider, user_id)
     except Exception as exc:
@@ -443,7 +439,7 @@ async def onboarding_node(state: AgentState) -> Dict[str, Any]:
             user_data["wallet_setup_warning"] = _solana_pending_retry_message(user_data)
         user_data["is_new_user"] = False
     else:
-        # 2) New user flow: require explicit choice.
+        # New user flow: require explicit choice.
         user_data: Dict[str, Any] = {}
         if retry_requested:
             try:

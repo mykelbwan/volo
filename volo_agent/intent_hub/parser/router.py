@@ -190,7 +190,4 @@ def _fallback_route(messages: Sequence[BaseMessage]) -> Dict[str, Union[str, Non
 async def route_conversation(
     messages: Sequence[BaseMessage],
 ) -> Dict[str, Union[str, None]]:
-    """
-    Classify conversation intent without blocking the event loop.
-    """
     return _fallback_route(messages)

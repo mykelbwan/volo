@@ -1,18 +1,3 @@
-"""
-Trigger condition ontology for event-driven execution.
-
-A TriggerCondition is attached to an Intent when the user expresses a
-conditional or time-based instruction such as:
-
-  "When ETH drops below $2500, swap 0.5 ETH for USDC"
-  "If BTC rises above $100k, bridge 1000 USDC to Base"
-
-The condition is parsed by the semantic parser, stored on the Intent, and
-then persisted in the intent_triggers MongoDB collection by the
-wait_for_trigger_node so the Observer service can evaluate it independently
-of the main LangGraph process.
-"""
-
 from __future__ import annotations
 
 from datetime import timedelta
@@ -24,14 +9,6 @@ from pydantic import BaseModel, Field
 
 
 class TriggerType(str, Enum):
-    """
-    Supported trigger condition types.
-
-    PRICE_BELOW  – fire when asset spot price falls below ``target`` USD.
-    PRICE_ABOVE  – fire when asset spot price rises above ``target`` USD.
-    TIME_AT      – fire at a specific UTC ISO-8601 timestamp (future).
-    """
-
     PRICE_BELOW = "price_below"
     PRICE_ABOVE = "price_above"
     TIME_AT = "time_at"
@@ -81,25 +58,6 @@ _COINGECKO_ID_MAP: dict[str, str] = {
 
 
 class TriggerCondition(BaseModel):
-    """
-    A structured condition that must be satisfied before a set of intents
-    is executed.
-
-    Attributes
-    ----------
-    type:
-        The kind of trigger (price-based or time-based).
-    asset:
-        Token symbol to watch (e.g. ``"ETH"``, ``"BTC"``).
-        Required for PRICE_BELOW / PRICE_ABOVE triggers.
-    target:
-        The price threshold in USD.
-        Required for PRICE_BELOW / PRICE_ABOVE triggers.
-    execute_at:
-        UTC ISO-8601 timestamp string for TIME_AT triggers
-        (e.g. ``"2025-12-31T00:00:00Z"``).
-    """
-
     type: TriggerType
     asset: Optional[str] = Field(default=None, description="Token symbol, e.g. 'ETH'")
     chain: Optional[str] = Field(
@@ -123,22 +81,16 @@ class TriggerCondition(BaseModel):
         default=None, description="ISO-8601 UTC timestamp for time triggers"
     )
 
-    # ── Serialisation helpers ─────────────────────────────────────────────────
-
     def to_dict(self) -> dict:
-        """Return a plain dict suitable for MongoDB storage."""
         return self.model_dump(exclude_none=True)
 
     @classmethod
     def from_dict(cls, data: dict) -> "TriggerCondition":
-        """Reconstruct from a plain dict (e.g. read from MongoDB)."""
         return cls(**data)
 
-    # ── Human-readable description ────────────────────────────────────────────
 
     @property
     def description(self) -> str:
-        """Return a user-facing description of this condition."""
         if (
             self.type == TriggerType.PRICE_BELOW
             and self.asset
@@ -163,36 +115,16 @@ class TriggerCondition(BaseModel):
                 return f"scheduled time reaches {self.execute_at}"
         return "unknown condition"
 
-    # ── Observer helpers ──────────────────────────────────────────────────────
-
     @property
     def coingecko_id(self) -> Optional[str]:
-        """
-        Return the CoinGecko coin ID for the watched asset, or None if
-        the asset is not in the supported symbol map.
-        """
         if not self.asset:
             return None
         return _COINGECKO_ID_MAP.get(self.asset.upper())
 
     def is_price_trigger(self) -> bool:
-        """Return True for any price-based trigger."""
         return self.type in (TriggerType.PRICE_BELOW, TriggerType.PRICE_ABOVE)
 
     def is_satisfied_by(self, current_price: float) -> bool:
-        """
-        Evaluate whether ``current_price`` satisfies this condition.
-
-        Parameters
-        ----------
-        current_price:
-            The current spot price of ``asset`` in USD.
-
-        Returns
-        -------
-        bool
-            True if the condition has been met and the intent should fire.
-        """
         if self.target is None:
             return False
         if not isfinite(float(current_price)) or not isfinite(float(self.target)):

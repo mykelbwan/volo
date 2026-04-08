@@ -21,7 +21,6 @@ from core.tasks.updater import upsert_task_from_state
 from core.utils.circuit_breaker import CircuitBreaker
 from graph.agent_state import AgentState
 
-# Tests patch this symbol directly. Keep it module-level, but load lazily.
 planning_llm: Any | None = None
 tools_registry: Any | None = None
 _PLANNING_LLM_CACHE: Any | None = None
@@ -426,9 +425,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
                 ],
             }
 
-    # 1. Resolve any dynamic markers in the existing plan nodes
-    # (Note: we don't return the resolved markers here as the executor will do it anyway,
-    # but we do it locally so the LLM prompt has the latest data)
     history_data = _compact_history_for_prompt(
         current_plan=current_plan,
         execution_state=execution_state,
@@ -441,7 +437,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             for ns in current_state.node_states.values()
         )
 
-    # 2. If already marked completed by executor, we just confirm
     if execution_state.completed:
         balance_message = _balance_completion_message(current_plan, execution_state)
         if balance_message:
@@ -489,8 +484,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             "messages": [AIMessage(content="Done. Your request is complete.")],
         }
 
-    # 2b. If nothing is ready and we're just waiting on running/pending steps,
-    # skip the LLM call to avoid noisy loops.
     if state.get("waiting_for_funds"):
         return {
             "route_decision": "WAITING_FUNDS",
@@ -518,14 +511,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
                 ],
             }
 
-    # ── Deterministic short-circuit (happy path) ─────────────────────────────
-    # If there are ready nodes and nothing has failed, the plan is on the happy
-    # path — there is nothing to heal or re-plan.  Calling the LLM here would
-    # just burn tokens to return "CONTINUE".  Skip it entirely.
-    #
-    # We only invoke the LLM when:
-    #   a) At least one node has FAILED (self-healing / replanning needed), or
-    #   b) There are no ready nodes (potential deadlock — LLM decides next step).
     has_any_failure = any(
         ns.status == StepStatus.FAILED for ns in execution_state.node_states.values()
     )
@@ -559,7 +544,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
             ],
         }
 
-    # ── Prepare tool descriptions for the LLM prompt ─────────────────────────
     ledger = get_ledger()
     cb = CircuitBreaker(ledger)
     disabled_tools = _get_ttl_cached(_DISABLED_TOOLS_CACHE, cb.get_disabled_tools) or []
@@ -587,7 +571,6 @@ async def planner_node(state: AgentState) -> Dict[str, Any]:
         tools=json.dumps(tool_docs, indent=2, default=str),
     )
 
-    # Call the LLM
     llm = _get_planning_llm()
     if llm is None:
         raise RuntimeError("planning_llm is not initialized")

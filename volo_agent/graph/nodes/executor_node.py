@@ -190,10 +190,6 @@ async def _run_with_timing(
 
 
 async def execution_engine_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Executes the DAG plan with async monitoring, retries, parallel execution,
-    guardrails, and semantic error tracking for anti-fragility.
-    """
     history = state.get("plan_history", [])
     if not history:
         return {}

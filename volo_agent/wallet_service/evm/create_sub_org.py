@@ -34,9 +34,6 @@ def create_sub_org(volo_user_id: str) -> Dict[str, Any]:
     except Exception as exc:
         message = str(exc).lower()
         if "already" in message and "exist" in message:
-            # Only reuse the exact digest-derived account id for this user.
-            # The old normalization path could collide across users; the SHA-256
-            # mapping removes that ambiguity so an existing name is the same user.
             account = get_evm_account(account_name)
         else:
             raise RuntimeError(
@@ -68,9 +65,6 @@ async def create_sub_org_async(volo_user_id: str) -> Dict[str, Any]:
     except Exception as exc:
         message = str(exc).lower()
         if "already" in message and "exist" in message:
-            # Only reuse the exact digest-derived account id for this user.
-            # The old normalization path could collide across users; the SHA-256
-            # mapping removes that ambiguity so an existing name is the same user.
             account = await get_evm_account_async(account_name)
         else:
             raise RuntimeError(

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Sequence
+from typing import Any, Awaitable, Sequence, cast
 
 from langchain_core.messages import BaseMessage
 
@@ -41,9 +41,6 @@ def _llm_timeout_seconds() -> float:
 
 
 async def call_llm_async(prompt: Sequence[BaseMessage]) -> dict | list:
-    """
-    Async LLM call that returns structured JSON.
-    """
     parser = json_parser
     if parser is None and _JSON_PARSER_CACHE is None:
         parser = _get_json_parser()
@@ -61,7 +58,10 @@ async def call_llm_async(prompt: Sequence[BaseMessage]) -> dict | list:
     try:
         ainvoke = getattr(parser, "ainvoke", None)
         if callable(ainvoke):
-            response = await asyncio.wait_for(ainvoke(prompt), timeout_seconds)
+            coro = ainvoke(prompt)
+            response = await asyncio.wait_for(
+                cast(Awaitable[Any], coro), timeout_seconds
+            )
         else:
             invoke = getattr(parser, "invoke", None)
             if not callable(invoke):

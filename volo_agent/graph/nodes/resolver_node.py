@@ -1,12 +1,3 @@
-"""
-Intent resolver node.
-
-Parallelization flags (environment variables):
-- ENABLE_SAME_CHAIN_PARALLEL_SWAPS: allow same-chain swaps to run in parallel.
-- PARALLEL_SWAP_MAX_PER_CHAIN: cap same-chain parallel swaps per chain (default 2).
-- PARALLEL_SWAP_MAX_SLIPPAGE: max slippage % allowed for same-chain parallel swaps (default 1.0).
-"""
-
 import os
 import re
 import uuid
@@ -267,9 +258,6 @@ def _swap_parallel_candidate(
 
 
 async def intent_resolver_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Resolves all complete Intents into an ExecutionPlan (DAG).
-    """
     intent_data_list = state.get("intents", [])
     if not intent_data_list:
         raise ValueError(

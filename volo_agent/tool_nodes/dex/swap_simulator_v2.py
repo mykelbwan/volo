@@ -62,10 +62,6 @@ def _resolve_to_wrapped(address: str, chain: ChainConfig) -> str:
 async def _pair_exists(
     w3: Any, factory_address: str, token_a: str, token_b: str
 ) -> bool:
-    """
-    Check whether a V2 liquidity pair exists for the two tokens by querying
-    the factory. Returns False if the pair address is the zero address.
-    """
     factory = w3.eth.contract(
         address=w3.to_checksum_address(factory_address),
         abi=UNISWAP_V2_FACTORY_ABI,
@@ -247,8 +243,6 @@ async def simulate_swap_v2(
             reason="SAME_TOKEN",
             message="token_in and token_out resolve to the same address.",
         )
-
-    # ── 3. Fetch decimals ────────────────────────────────────────────────────
     try:
         decimals_in = await _get_token_decimals(w3, resolved_in, chain.chain_id)
         decimals_out = await _get_token_decimals(w3, resolved_out, chain.chain_id)
@@ -258,7 +252,6 @@ async def simulate_swap_v2(
             message=f"Could not fetch token decimals: {e}",
         )
 
-    # ── 4. Convert amount to raw units ───────────────────────────────────────
     amount_in_decimal = safe_decimal(amount_in)
     if amount_in_decimal is None:
         return SimulationErrorV2(
@@ -284,7 +277,6 @@ async def simulate_swap_v2(
             message="amount_in must be greater than zero.",
         )
 
-    # ── 5. Resolve swap path via factory ─────────────────────────────────────
     path = await _resolve_path(
         w3,
         chain.v2_factory,
@@ -304,7 +296,6 @@ async def simulate_swap_v2(
             ),
         )
 
-    # ── 6. Build router contract and get quote ───────────────────────────────
     router = w3.eth.contract(
         address=w3.to_checksum_address(chain.v2_router),
         abi=UNISWAP_V2_ROUTER_ABI,
@@ -324,13 +315,10 @@ async def simulate_swap_v2(
 
     amount_out_raw = amounts[-1]
     amount_out_decimal = Decimal(amount_out_raw) / Decimal(10**decimals_out)
-
-    # ── 7. Apply slippage ────────────────────────────────────────────────────
     slippage_multiplier = Decimal(1) - (slippage_decimal / Decimal(100))
     amount_out_minimum = amount_out_decimal * slippage_multiplier
     amount_out_minimum_raw = int(amount_out_minimum * Decimal(10**decimals_out))
 
-    # ── 8. Estimate price impact ─────────────────────────────────────────────
     # Compare a 1-unit reference quote (scaled to the swap size) against the
     # actual output. The difference is the price impact from pool depth.
     price_impact_pct = Decimal(0)
@@ -345,7 +333,6 @@ async def simulate_swap_v2(
                     (expected_out - amount_out_decimal) / expected_out * Decimal(100)
                 ).quantize(Decimal("0.0001"))
 
-    # ── 9. Estimate gas ──────────────────────────────────────────────────────
     gas_estimate = await _estimate_gas(
         w3=w3,
         router_address=chain.v2_router,
@@ -358,7 +345,6 @@ async def simulate_swap_v2(
         native_out=native_out and supports_native_swaps,
     )
 
-    # ── 10. Check allowance (skip for native token input) ────────────────────
     needs_approval = False
     current_allowance = 0
 

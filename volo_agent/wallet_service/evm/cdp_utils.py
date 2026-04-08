@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from typing import Any, Dict, Tuple, TypedDict
+from typing import Any, Dict, Tuple, TypedDict, cast
 
 from wallet_service.common.cdp_helpers import (
     await_cdp_call,
@@ -44,7 +44,6 @@ _ACCOUNT_CACHE_TTL_SECONDS = 600  # 10 minutes
 
 
 def clear_evm_account_cache():
-    """Clear the in-memory account cache. Useful for testing."""
     _ACCOUNT_CACHE.clear()
 
 
@@ -74,7 +73,7 @@ async def get_evm_account_async(account_name: str):
 
     async with managed_cdp_client() as cdp:
         account = await await_cdp_call(
-            cdp.evm.get_account(name=account_name),
+            cast(Any, cdp).evm.get_account(name=account_name),
             operation="loading EVM account",
         )
         # Update cache
@@ -90,7 +89,7 @@ async def create_evm_account_async(account_name: str):
     account_name = require_non_empty_str(account_name, field="account_name")
     async with managed_cdp_client() as cdp:
         account = await await_cdp_call(
-            cdp.evm.create_account(name=account_name),
+            cast(Any, cdp).evm.create_account(name=account_name),
             operation="creating EVM account",
         )
         # Update cache
@@ -114,7 +113,7 @@ async def list_token_balances_async(
     wallet_address = require_non_empty_str(address, field="address")
     async with managed_cdp_client() as cdp:
         return await await_cdp_call(
-            cdp.evm.list_token_balances(
+            cast(Any, cdp).evm.list_token_balances(
                 address=wallet_address,
                 network=normalize_evm_network(network),
                 page_size=page_size,
@@ -169,7 +168,7 @@ async def sign_evm_transaction_by_name_async(
 
             if account is None:
                 account = await await_cdp_call(
-                    cdp.evm.get_account(name=account_name),
+                    cast(Any, cdp).evm.get_account(name=account_name),
                     operation="loading EVM account",
                 )
                 # Update cache

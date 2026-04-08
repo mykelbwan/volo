@@ -35,7 +35,6 @@ _INTENT_REGISTRY: dict[str, set[str]] = {
     "holding": {TAG_BALANCE},
     "holdings": {TAG_BALANCE},
     "funds": {TAG_BALANCE},
-    # "sepolia": {TAG_BALANCE}, # Hint that 'sepolia balance' is a balance query
     "wallet": {TAG_WALLET},
     "add": {TAG_ACTION},
     "send": {TAG_ACTION},

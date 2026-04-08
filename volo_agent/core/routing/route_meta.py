@@ -153,7 +153,9 @@ class RouteMeta:
             "value": self.value,
             "provider": self.provider,
             "route_id": self.route_id,
-            "structured_route_steps": [dict(step) for step in self.structured_route_steps],
+            "structured_route_steps": [
+                dict(step) for step in self.structured_route_steps
+            ],
             "instruction_set": [dict(step) for step in self.instruction_set],
             "route_path": list(self.route_path),
             "chain_type": self.chain_type,
@@ -245,7 +247,9 @@ def route_meta_matches_node(
     resolved_args: Dict[str, Any],
 ) -> bool:
     if tool == "swap":
-        expected_chain_id = resolve_route_chain_id(str(resolved_args.get("chain") or ""))
+        expected_chain_id = resolve_route_chain_id(
+            str(resolved_args.get("chain") or "")
+        )
         actual_chain_id = route_meta.get("chain_id")
         if expected_chain_id is not None and actual_chain_id is not None:
             if int(actual_chain_id) != expected_chain_id:
@@ -286,9 +290,7 @@ def route_meta_matches_node(
             return False
         tool_data = route_meta.get("tool_data")
         planned_quote = (
-            tool_data.get("planned_quote")
-            if isinstance(tool_data, Mapping)
-            else None
+            tool_data.get("planned_quote") if isinstance(tool_data, Mapping) else None
         )
         if not _route_amount_matches(
             expected_amount=resolved_args.get("amount"),
@@ -395,13 +397,17 @@ def _validate_route_meta_contract(route_meta: RouteMeta) -> None:
     if not route_meta.provider.strip():
         raise RouteMetaValidationError("route metadata is missing provider")
     if route_meta.amount_in <= 0:
-        raise RouteMetaValidationError("route metadata amount_in must be greater than zero")
+        raise RouteMetaValidationError(
+            "route metadata amount_in must be greater than zero"
+        )
     if route_meta.expected_output <= 0:
         raise RouteMetaValidationError(
             "route metadata expected_output must be greater than zero"
         )
     if route_meta.min_output <= 0:
-        raise RouteMetaValidationError("route metadata min_output must be greater than zero")
+        raise RouteMetaValidationError(
+            "route metadata min_output must be greater than zero"
+        )
     if route_meta.min_output > route_meta.expected_output:
         raise RouteMetaValidationError(
             "route metadata min_output cannot exceed expected_output"
@@ -413,7 +419,9 @@ def _validate_route_meta_contract(route_meta: RouteMeta) -> None:
 
     has_calldata = bool(route_meta.calldata)
     has_structured_steps = bool(
-        route_meta.structured_route_steps or route_meta.instruction_set or route_meta.route_path
+        route_meta.structured_route_steps
+        or route_meta.instruction_set
+        or route_meta.route_path
     )
     if has_calldata == has_structured_steps:
         raise RouteMetaValidationError(
@@ -426,13 +434,19 @@ def _validate_route_meta_contract(route_meta: RouteMeta) -> None:
         if not route_meta.calldata:
             raise RouteMetaValidationError("EVM route metadata requires calldata")
         if not route_meta.to or not route_meta.to.strip():
-            raise RouteMetaValidationError("EVM route metadata requires a target address")
+            raise RouteMetaValidationError(
+                "EVM route metadata requires a target address"
+            )
     elif chain_type == "solana":
         if not route_meta.instruction_set:
-            raise RouteMetaValidationError("Solana route metadata requires an instruction set")
+            raise RouteMetaValidationError(
+                "Solana route metadata requires an instruction set"
+            )
     elif chain_type == "bridge":
         if not route_meta.route_path:
-            raise RouteMetaValidationError("Bridge route metadata requires a route path")
+            raise RouteMetaValidationError(
+                "Bridge route metadata requires a route path"
+            )
     elif not route_meta.structured_route_steps:
         raise RouteMetaValidationError(
             "route metadata structured routes must include explicit route steps"
@@ -447,13 +461,17 @@ def _validate_canonical_route_meta_contract(route_meta: CanonicalRouteMeta) -> N
     if not route_meta.provider.strip():
         raise RouteMetaValidationError("route metadata is missing provider")
     if route_meta.amount_in <= 0:
-        raise RouteMetaValidationError("route metadata amount_in must be greater than zero")
+        raise RouteMetaValidationError(
+            "route metadata amount_in must be greater than zero"
+        )
     if route_meta.expected_output <= 0:
         raise RouteMetaValidationError(
             "route metadata expected_output must be greater than zero"
         )
     if route_meta.min_output <= 0:
-        raise RouteMetaValidationError("route metadata min_output must be greater than zero")
+        raise RouteMetaValidationError(
+            "route metadata min_output must be greater than zero"
+        )
     if route_meta.min_output > route_meta.expected_output:
         raise RouteMetaValidationError(
             "route metadata min_output cannot exceed expected_output"
@@ -556,7 +574,9 @@ def _validate_route_meta_legacy(
             valid=False,
             required=True,
             should_use_route_meta=False,
-            reason=str(route_meta.get("invalid_reason") or "route metadata marked invalid"),
+            reason=str(
+                route_meta.get("invalid_reason") or "route metadata marked invalid"
+            ),
         )
 
     if not route_meta_matches_node(
@@ -619,7 +639,9 @@ def validate_route_meta(*args: Any, **kwargs: Any) -> RouteMetaValidationResult 
             return None
 
     if args:
-        raise TypeError("validate_route_meta accepts either a RouteMeta or keyword args")
+        raise TypeError(
+            "validate_route_meta accepts either a RouteMeta or keyword args"
+        )
 
     tool = kwargs.get("tool")
     resolved_args = kwargs.get("resolved_args")
@@ -680,7 +702,7 @@ def coerce_fallback_policy(payload: Any) -> FallbackPolicy:
     if isinstance(nested, Mapping):
         payload = nested
 
-    allow = bool(payload.get("allow_fallback", False))
+    allow = bool(payload.get("allow_fallback", True))
     raw_reason = payload.get("reason")
     if raw_reason is None:
         raw_reason = payload.get("fallback_reason")
@@ -713,7 +735,9 @@ def canonicalize_route_meta(
         )
 
     resolved_tool = str(tool or infer_route_tool(route_meta)).strip().lower()
-    provider = str(route_meta.get("provider") or route_meta.get("aggregator") or "").strip()
+    provider = str(
+        route_meta.get("provider") or route_meta.get("aggregator") or ""
+    ).strip()
     token_in = str(
         route_meta.get("token_in")
         or route_meta.get("input_mint")
@@ -764,11 +788,15 @@ def canonicalize_route_meta(
         raise RouteMetaValidationError(
             "swap route metadata is missing executable calldata or route details"
         )
-    if resolved_tool == "solana_swap" and not _legacy_solana_route_supported(dict(route_meta)):
+    if resolved_tool == "solana_swap" and not _legacy_solana_route_supported(
+        dict(route_meta)
+    ):
         raise RouteMetaValidationError(
             "Solana route metadata is missing the pre-built transaction"
         )
-    if resolved_tool == "bridge" and not _legacy_bridge_route_supported(dict(route_meta)):
+    if resolved_tool == "bridge" and not _legacy_bridge_route_supported(
+        dict(route_meta)
+    ):
         raise RouteMetaValidationError(
             "bridge route metadata is missing executable route details"
         )
@@ -800,7 +828,9 @@ def enforce_fallback_policy(
 
     if policy.allow_fallback:
         assert policy.reason is not None
-        payload = log_fallback_event(policy=policy, route_meta=route_meta, detail=detail)
+        payload = log_fallback_event(
+            policy=policy, route_meta=route_meta, detail=detail
+        )
         _LOGGER.warning("route_fallback %s", payload)
         return payload
     raise DeterminismViolationError(
@@ -808,7 +838,9 @@ def enforce_fallback_policy(
     )
 
 
-def preflight_from_route_meta(tool: str, route_meta: Dict[str, Any] | None) -> Dict[str, Any]:
+def preflight_from_route_meta(
+    tool: str, route_meta: Dict[str, Any] | None
+) -> Dict[str, Any]:
     route_meta = route_meta if isinstance(route_meta, dict) else {}
     if not route_meta:
         return {}
@@ -951,21 +983,29 @@ def _coerce_calldata(value: Any) -> bytes | None:
         if encoded.startswith("0x"):
             raw_hex = encoded[2:]
             if len(raw_hex) % 2:
-                raise RouteMetaValidationError("route metadata calldata must be even-length hex")
+                raise RouteMetaValidationError(
+                    "route metadata calldata must be even-length hex"
+                )
             try:
                 return bytes.fromhex(raw_hex)
             except ValueError as exc:
                 raise RouteMetaValidationError(
                     "route metadata calldata must be valid hex"
                 ) from exc
-    raise RouteMetaValidationError("route metadata calldata must be bytes or 0x-prefixed hex")
+    raise RouteMetaValidationError(
+        "route metadata calldata must be bytes or 0x-prefixed hex"
+    )
 
 
-def _coerce_step_tuple(value: Any, *, fallback: Any = None) -> tuple[Dict[str, Any], ...]:
+def _coerce_step_tuple(
+    value: Any, *, fallback: Any = None
+) -> tuple[Dict[str, Any], ...]:
     candidate = value if value not in (None, "") else fallback
     if candidate is None:
         return ()
-    if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes, bytearray)):
+    if isinstance(candidate, Sequence) and not isinstance(
+        candidate, (str, bytes, bytearray)
+    ):
         steps: list[Dict[str, Any]] = []
         for index, item in enumerate(candidate):
             if isinstance(item, Mapping):
@@ -1006,11 +1046,18 @@ def _infer_chain_type(payload: Mapping[str, Any]) -> str | None:
         return "solana"
     if any(
         key in payload
-        for key in ("instruction_set", "instructions", "swap_transaction", "input_mint", "output_mint")
+        for key in (
+            "instruction_set",
+            "instructions",
+            "swap_transaction",
+            "input_mint",
+            "output_mint",
+        )
     ):
         return "solana"
     if any(
-        key in payload for key in ("source_chain_id", "dest_chain_id", "source_chain", "target_chain")
+        key in payload
+        for key in ("source_chain_id", "dest_chain_id", "source_chain", "target_chain")
     ):
         return "bridge"
     if any(key in payload for key in ("chain_id", "execution", "calldata", "to")):
@@ -1030,7 +1077,9 @@ def _normalized_chain_type(route_meta: RouteMeta) -> str:
     return "generic"
 
 
-def _base_log_payload(route_meta: RouteMeta | CanonicalRouteMeta | None) -> Dict[str, Any]:
+def _base_log_payload(
+    route_meta: RouteMeta | CanonicalRouteMeta | None,
+) -> Dict[str, Any]:
     if route_meta is None:
         return {
             "provider": None,

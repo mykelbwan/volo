@@ -1,9 +1,9 @@
+import inspect
 from importlib import import_module
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from intent_hub.ontology.intent import Intent
 from intent_hub.utils.messages import format_with_recovery
-
 
 _RESOLVER_IMPORTS = {
     "swap": ("intent_hub.resolver.swap_resolver", "resolve_swap"),
@@ -26,7 +26,11 @@ def _get_resolver(intent_type: str) -> Callable[[Intent], Awaitable[Any]] | None
     module = import_module(module_name)
     resolver = getattr(module, fn_name, None)
     if callable(resolver):
-        _RESOLVER_CACHE[intent_type] = resolver
+        if not inspect.iscoroutinefunction(resolver):
+            raise TypeError(f"Resolver for {intent_type} must be a coroutine function")
+        _RESOLVER_CACHE[intent_type] = cast(
+            Callable[[Intent], Awaitable[Any]], resolver
+        )
         return resolver
     return None
 

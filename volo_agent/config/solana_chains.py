@@ -139,7 +139,6 @@ def is_solana_network(network: str) -> bool:
 
 
 def is_solana_testnet(network: str) -> bool:
-    """True if the given Solana network is a testnet/devnet."""
     try:
         return get_solana_chain(network).is_testnet
     except KeyError:
@@ -147,7 +146,6 @@ def is_solana_testnet(network: str) -> bool:
 
 
 def normalize_solana_mint(mint: str) -> str:
-    """Convert 'sol', 'native', or WSOL variants to the canonical WSOL mint address."""
     m = mint.strip().lower()
     if m in ("native", "sol", WSOL_MINT.lower()):
         return WSOL_MINT

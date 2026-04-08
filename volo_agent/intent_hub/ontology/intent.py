@@ -22,16 +22,11 @@ class Intent(BaseModel):
     status: IntentStatus
     raw_input: str
     clarification_prompt: Optional[str] = None
-    # Present when the user expresses a conditional instruction such as
-    # "when ETH drops below $2500, swap 0.5 ETH for USDC".
-    # The wait_for_trigger_node registers this with the Observer service
-    # and pauses the graph until the condition is satisfied.
     condition: Optional[TriggerCondition] = None
 
 
 class ExecutionPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
-
     intent_type: str
     chain: str
     parameters: Dict[str, Any] = Field(default_factory=dict)

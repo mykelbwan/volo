@@ -7,11 +7,6 @@ _HEX_CHARS = set("0123456789abcdef")
 
 
 def encode_transfer(recipient: str, amount: int) -> str:
-    """
-    ABI-encode a call to ERC-20 transfer(address,uint256).
-
-    Returns a 0x-prefixed hex string suitable for use as transaction `data`.
-    """
     # keccak256("transfer(address,uint256)")[0:4]
     method_id = "a9059cbb"
 
@@ -44,7 +39,6 @@ def encode_transfer(recipient: str, amount: int) -> str:
 
 
 def to_raw_amount(human_amount: Decimal | str | float | int, decimals: int) -> int:
-    """Convert human-readable token amount to raw integer units."""
     if not isinstance(decimals, int) or decimals < 0:
         raise ValueError(
             format_with_recovery(

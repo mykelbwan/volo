@@ -48,7 +48,6 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=1)
 def _get_chain_summary() -> str:
-    """Fast, cached summary of all supported chains and common aliases."""
     from config.chains import supported_chains, _CHAIN_ALIASES as EVM_ALIASES
     from config.solana_chains import SOLANA_CHAINS, _CHAIN_ALIASES as SOLANA_ALIASES
     

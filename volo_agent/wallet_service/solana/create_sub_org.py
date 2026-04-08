@@ -32,8 +32,6 @@ async def create_sub_org(volo_user_id: str) -> Dict[str, Any]:
     except Exception as exc:
         message = str(exc).lower()
         if "already" in message and "exist" in message:
-            # Reusing an existing account is only safe because the account name
-            # is now the full SHA-256 mapping of the exact user id.
             account = get_solana_account(account_name)
         else:
             raise RuntimeError(

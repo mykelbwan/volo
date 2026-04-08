@@ -5,7 +5,7 @@ import copy
 import logging
 import os
 from functools import lru_cache, partial
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from config.chains import get_chain_by_name
 from config.solana_chains import SOL_DECIMALS, get_solana_chain
@@ -106,7 +106,7 @@ def _get_token_data_cached(
             exc,
         )
 
-    # ── Fallback: minimal stub so callers can handle the miss gracefully ──────
+    # minimal stub so callers can handle the miss gracefully 
     logger.error(
         "get_token_data: all resolution paths failed for %s on %s. "
         "Returning empty chains dict.",
@@ -178,7 +178,7 @@ async def get_token_data_async(symbol: str, chain: str) -> Dict[str, Any]:
         ) from exc
 
 
-def get_address_for_chain(token_data: Dict[str, Any], chain_name: str) -> Optional[str]:
+def get_address_for_chain(token_data: Mapping[str, Any], chain_name: str) -> Optional[str]:
     chain = require_non_empty_str(chain_name, field="chain_name")
     if not isinstance(token_data, dict):
         return None
@@ -215,7 +215,7 @@ def get_address_for_chain(token_data: Dict[str, Any], chain_name: str) -> Option
 
 
 async def get_address_for_chain_async(
-    token_data: Dict[str, Any], chain_name: str
+    token_data: Mapping[str, Any], chain_name: str
 ) -> Optional[str]:
     return get_address_for_chain(token_data, chain_name)
 
@@ -256,10 +256,10 @@ def _registry_lookup(
 
     registry = get_token_registry()
 
-    # 1. Exact symbol match
+    # Exact symbol match
     entry = registry.get(symbol, chain_id)
 
-    # 2. Alias match
+    # Alias match
     if entry is None:
         entry = registry.get_by_alias(symbol.lower(), chain_id)
 

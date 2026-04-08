@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 # Central planner configuration defaults (version-controlled).
 # Adjust here for repo-wide behavior; optional env override exists in scorer.
 

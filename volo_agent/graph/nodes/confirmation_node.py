@@ -49,7 +49,6 @@ async def confirmation_node(state: AgentState) -> Dict[str, Any]:
         except Exception:
             pass  # malformed quote — skip silently
 
-    # ── Build receipt ────────────────────────────────────────────────────────
     receipt_lines: list[str] = ["Review this request.", ""]
 
     # Accumulate totals per (chain, native_symbol) for the footer.
@@ -70,7 +69,6 @@ async def confirmation_node(state: AgentState) -> Dict[str, Any]:
         p = node.args
         preflight = preflight_estimates.get(node_id, {})
 
-        # ── Step description ─────────────────────────────────────────────
         if node.tool == "swap":
             receipt_lines.append(
                 f"{count}. Swap {p.get('amount_in')} {p.get('token_in_symbol')} "
@@ -148,7 +146,6 @@ async def confirmation_node(state: AgentState) -> Dict[str, Any]:
             # Accumulate for the footer total
             fee_totals[(quote.chain, quote.native_symbol)] += quote.fee_amount_native
         else:
-            # Transfers and unwraps no longer carry platform fees; omit the fee line.
             if node.tool not in {"transfer", "unwrap"}:
                 receipt_lines.append("  Platform fee: unavailable.")
 

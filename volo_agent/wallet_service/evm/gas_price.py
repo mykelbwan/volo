@@ -13,8 +13,8 @@ from config.chains import ChainConfig, get_chain_by_id, get_chain_by_name
 from core.utils.evm_async import get_shared_async_web3
 from core.utils.upstash_client import get_async_redis
 
-# Cache TTL in seconds — gas price is refreshed at most once every 5 minutes.
-_CACHE_TTL_SECONDS = 20
+# Cache TTL in seconds — gas price is refreshed at most once every 50 seconds
+_CACHE_TTL_SECONDS = 50
 _VOLATILE_CACHE_TTL_SECONDS = 10
 _REDIS_KEY_PREFIX = "gas_price"
 _MIN_PRIORITY_FEE_WEI = 1_500_000_000
@@ -127,12 +127,7 @@ class GasPriceCache:
         return f"{_REDIS_KEY_PREFIX}:{int(chain_id)}"
 
     async def _fetch_async(self, chain: ChainConfig) -> int:
-        """
-        Fetch gas price via AsyncWeb3.
-        """
         w3 = await get_shared_async_web3(chain.rpc_url)
-        # In newer web3.py versions, gas_price is a property but returns an awaitable
-        # in AsyncEth. We handle both for robustness.
         result = w3.eth.gas_price
         if inspect.isawaitable(result):
             gas_price_wei = _parse_int(await result) or 0
@@ -155,12 +150,12 @@ class GasPriceCache:
         chain = self._resolve_chain(chain_id, chain_name)
         loop_id = id(asyncio.get_running_loop())
 
-        # 1. Local Memory Cache (Fastest)
+        # Local Memory Cache (Fastest)
         entry = self._get_fresh_entry(chain.chain_id)
         if entry is not None:
             return entry.gas_price_wei
 
-        # 2. Redis Cache (Network Bound)
+        # Redis Cache (Network Bound)
         redis = await get_async_redis()
         if redis is not None:
             try:
@@ -176,7 +171,7 @@ class GasPriceCache:
                 # Redis is best-effort only.
                 pass
 
-        # 3. RPC Fetch (Slowest, Thundering Herd Protected)
+        # RPC Fetch
         while True:
             should_refresh, refresh_event = self._begin_refresh(chain.chain_id, loop_id)
             if should_refresh:
@@ -266,9 +261,6 @@ class GasPriceCache:
         chain_id: int | None = None,
         chain_name: str | None = None,
     ) -> None:
-        """
-        Invalidate in-memory and Redis cache entries after transaction failures.
-        """
         chain = self._resolve_chain(chain_id, chain_name)
         self.invalidate(chain_id=chain.chain_id)
         redis = await get_async_redis()
@@ -286,10 +278,6 @@ class GasPriceCache:
         chain_id: int | None = None,
         chain_name: str | None = None,
     ) -> float | None:
-        """
-        Return the monotonic timestamp of when the gas price was last fetched
-        for the given chain, or None if no cached value exists.
-        """
         chain = self._resolve_chain(chain_id, chain_name)
         with self._state_lock:
             entry = self._entries.get(chain.chain_id)
@@ -300,10 +288,6 @@ class GasPriceCache:
         chain_id: int | None = None,
         chain_name: str | None = None,
     ) -> float:
-        """
-        Return how many seconds remain before the cached value expires
-        and a fresh fetch will be triggered. Returns 0.0 if stale or uncached.
-        """
         chain = self._resolve_chain(chain_id, chain_name)
         with self._state_lock:
             entry = self._entries.get(chain.chain_id)
@@ -312,11 +296,6 @@ class GasPriceCache:
         return max(0.0, entry.ttl_seconds - (time.monotonic() - entry.fetched_at))
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton — import and use this directly rather than
-# instantiating GasPriceCache yourself, so the cache and its locks are
-# shared across all callers within the same process.
-# ---------------------------------------------------------------------------
 gas_price_cache = GasPriceCache()
 
 
@@ -339,9 +318,6 @@ def to_eip1559_fees(gas_price_wei: int) -> tuple[int, int]:
 
 
 async def estimate_eip1559_fees(w3: Any, gas_price_wei: int) -> tuple[int, int]:
-    """
-    Estimate safe EIP-1559 fee caps using live chain data when available.
-    """
     try:
         latest_block = w3.eth.get_block("latest")
         if inspect.isawaitable(latest_block):

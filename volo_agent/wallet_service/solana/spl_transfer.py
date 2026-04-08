@@ -35,7 +35,6 @@ _TOKEN_DECIMALS_IN_FLIGHT: dict[str, Future[int]] = {}
 
 
 async def _decode_mint_decimals_async(mint_info: Any) -> int:
-    """Decode SPL mint decimals from raw account data."""
     data = getattr(mint_info, "value", None)
     if data is None:
         raise ValueError("Mint account info missing value")
@@ -58,7 +57,6 @@ async def _decode_mint_decimals_async(mint_info: Any) -> int:
 
 
 def _parse_amount(amount: Decimal | str | float | int, decimals: int) -> int:
-    """Convert a human-readable SPL amount into raw base units."""
     try:
         value = Decimal(str(amount))
     except (InvalidOperation, ValueError, TypeError) as exc:
@@ -98,7 +96,6 @@ def _resolve_solana_network(rpc_url: str, network: str | None) -> str:
 async def _get_cached_mint_decimals(
     client: Any, mint_pubkey: Any, mint_address: str
 ) -> int:
-    """Cache mint decimals indefinitely because token metadata is immutable."""
     cache_key = str(mint_address).strip()
     with _TOKEN_DECIMALS_CACHE_LOCK:
         cached = _TOKEN_DECIMALS_CACHE.get(cache_key)
@@ -260,9 +257,6 @@ async def execute_spl_transfer(
     decimals: int | None = None,
     idempotency_key: str | None = None,
 ) -> str:
-    """
-    Asynchronously transfer SPL tokens via CDP using an async Solana client.
-    """
     rpc = require_non_empty_str(rpc_url, field="rpc_url")
     normalized_network = _resolve_solana_network(rpc, network)
     sender_value = require_non_empty_str(sender, field="sender")

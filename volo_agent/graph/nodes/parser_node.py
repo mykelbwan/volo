@@ -234,10 +234,6 @@ async def _continue_pending_intent(
 
 
 async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
-    """
-    Parses conversation history to extract a list of intents.
-    If any intent is incomplete, appends the first clarification prompt found.
-    """
     full_messages = state["messages"]
     requested_scope = state.get("parse_scope") or parse_scope_default()
     messages, older_messages, effective_scope = select_messages_for_scope(

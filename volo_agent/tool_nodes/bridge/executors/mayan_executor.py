@@ -104,11 +104,11 @@ async def _fetch_swap_transaction_async(
         raise RuntimeError("Mayan returned an unreadable response. Please try again.")
 
 
-async def _execute_evm_to_solana(
+async def _execute_from_evm(
     quote: BridgeRouteQuote,
     sub_org_id: str,
     sender: str,
-    solana_recipient: str,
+    destination_recipient: str,
     slippage: float,
 ) -> MayanBridgeResult:
     from config.abi import ERC20_ABI
@@ -141,7 +141,7 @@ async def _execute_evm_to_solana(
     tx_data = await _fetch_swap_transaction_async(
         quote_id=quote_id,
         from_address=sender,
-        to_address=solana_recipient,
+        to_address=destination_recipient,
         slippage=slippage,
         timeout=15.0,
     )
@@ -271,10 +271,11 @@ async def _execute_evm_to_solana(
     await _await_mayan_receipt(w3, tx_hash)
 
     _LOGGER.info(
-        "[mayan] EVM→Solana bridge submitted  tx=%s  route=%s  chain=%s",
+        "[mayan] EVM-origin bridge submitted  tx=%s  route=%s  src=%s  dst=%s",
         tx_hash[:16],
         route_type,
-        chain.name,
+        quote.source_chain_name,
+        quote.dest_chain_name,
     )
 
     return MayanBridgeResult(
@@ -287,7 +288,7 @@ async def _execute_evm_to_solana(
         output_amount=quote.output_amount,
         source_chain_name=quote.source_chain_name,
         dest_chain_name=quote.dest_chain_name,
-        recipient=solana_recipient,
+        recipient=destination_recipient,
         status="pending",
     )
 
@@ -371,7 +372,6 @@ async def execute_mayan_bridge(
 ) -> MayanBridgeResult:
     tool_data: Dict[str, Any] = quote.tool_data or {}
     src_is_sol: bool = bool(tool_data.get("srcIsSolana", False))
-    dst_is_sol: bool = bool(tool_data.get("dstIsSolana", False))
     slippage: float = float(tool_data.get("slippage", 0.01))
 
     # Validate quote freshness — Mayan quote hashes expire quickly.
@@ -384,12 +384,6 @@ async def execute_mayan_bridge(
                 "Please try again — a new quote will be fetched automatically."
             )
 
-    if not src_is_sol and not dst_is_sol:
-        raise NonRetryableError(
-            "Mayan only supports routes that involve Solana. "
-            "Please use a different bridge for EVM ↔ EVM transfers."
-        )
-
     if src_is_sol:
         # Solana → EVM: sender is Solana public key, recipient is EVM address.
         return await _execute_solana_to_evm(
@@ -400,8 +394,8 @@ async def execute_mayan_bridge(
             slippage,
         )
     else:
-        # EVM → Solana: sender is EVM address, recipient is Solana public key.
-        return await _execute_evm_to_solana(
+        # EVM-origin routes (EVM→Solana or EVM→EVM) execute via /swap/trx.
+        return await _execute_from_evm(
             quote,
             sub_org_id,
             sender,

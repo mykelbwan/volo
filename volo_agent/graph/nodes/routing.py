@@ -43,7 +43,7 @@ def route_post_parse(state: AgentState) -> str:
     if not intents:
         return "end"
 
-    # Priority 1: block on any incomplete intent regardless of conditions.
+    # block on any incomplete intent regardless of conditions.
     for data in intents:
         if data.get("status") == IntentStatus.INCOMPLETE:
             # Allow deterministic template resolution for common flows.
@@ -51,13 +51,13 @@ def route_post_parse(state: AgentState) -> str:
                 break
             return "end"
 
-    # Priority 2: any complete intent with a trigger condition → park the graph.
+    # any complete intent with a trigger condition → park the graph.
     for data in intents:
         condition = data.get("condition")
         if condition and isinstance(condition, dict) and condition.get("type"):
             return "wait_trigger"
 
-    # Priority 3: all complete, no conditions → immediate execution path.
+    # all complete, no conditions → immediate execution path.
     return "resolve"
 
 
