@@ -90,28 +90,6 @@ BRIDGE_PROTOCOLS: dict[str, BridgeProtocolConfig] = {
 }
 
 
-def get_routes(
-    source_chain_id: int,
-    dest_chain_id: int,
-    token_symbol: str,
-) -> list[tuple[BridgeProtocolConfig, BridgeRoute]]:
-    symbol = token_symbol.upper()
-    results = []
-
-    for protocol in BRIDGE_PROTOCOLS.values():
-        for route in protocol.routes:
-            if not route.enabled:
-                continue
-            if (
-                route.source_chain_id == source_chain_id
-                and route.dest_chain_id == dest_chain_id
-                and (route.token_symbol == symbol or route.token_symbol == "*")
-            ):
-                results.append((protocol, route))
-
-    return results
-
-
 def get_dynamic_protocols() -> list[BridgeProtocolConfig]:
     return [
         protocol for protocol in BRIDGE_PROTOCOLS.values() if protocol.dynamic_routes

@@ -88,11 +88,6 @@ async def _fetch_quote_with_timeout(
     sender: str,
     timeout: float,
 ) -> Optional[SolanaSwapRouteQuote]:
-    """
-    Call one aggregator's ``get_quote()`` with a hard timeout.
-
-    Returns ``None`` on timeout or any exception — never raises.
-    """
     try:
         return await asyncio.wait_for(
             aggregator.get_quote(
@@ -150,17 +145,17 @@ _PCT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 
 
 def _is_high_volatility_slippage(err_msg: str, current_slippage: float) -> bool:
-    # Signal 1: already trying a medium-high slippage with no luck.
+    # already trying a medium-high slippage with no luck.
     if current_slippage >= 3.0:
         return True
 
     low = err_msg.lower()
 
-    # Signal 2: explicit keyword match.
+    # explicit keyword match.
     if any(kw in low for kw in _VOLATILE_KEYWORDS):
         return True
 
-    # Signal 3: large explicit percentage in the error text.
+    # large explicit percentage in the error text.
     for match in _PCT_RE.finditer(err_msg):
         try:
             if float(match.group(1)) >= 5.0:
@@ -172,9 +167,6 @@ def _is_high_volatility_slippage(err_msg: str, current_slippage: float) -> bool:
 
 
 def _classify_broadcast_error(err_msg: str) -> str:
-    """
-    Convert a raw broadcast error message into plain-language user feedback.
-    """
     low = err_msg.lower()
 
     if any(k in low for k in ("slippage", "price", "exceeded", "tolerance")):
@@ -210,13 +202,7 @@ def _route_meta_contains_untrusted_solana_tx(route_meta: Any) -> bool:
     return bool(route_meta.get("swap_transaction") or route_meta.get("calldata"))
 
 
-# ---------------------------------------------------------------------------
-# Main tool function
-# ---------------------------------------------------------------------------
-
-
 async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
-    # ── 1. Extract and validate parameters ───────────────────────────────────
     token_in_symbol: str = str(parameters.get("token_in_symbol") or "token")
     token_out_symbol: str = str(parameters.get("token_out_symbol") or "token")
     token_in_mint: str = str(parameters.get("token_in_mint") or "").strip()
@@ -263,7 +249,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
         )
 
-    # ── 2. Resolve chain config ───────────────────────────────────────────────
     try:
         chain = get_solana_chain(network)
     except KeyError:
@@ -306,7 +291,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
     if current_claim is not None and current_claim.tx_hash and current_claim.result:
         return dict(current_claim.result)
 
-    # ── 3. Check for a pre-built route from route_planner_node ───────────────
     route_meta: Dict[str, Any] = parameters.get("_route_meta") or {}
     fallback_policy = coerce_fallback_policy(parameters.get("_fallback_policy"))
     if route_meta.get("invalid") is True:
@@ -343,7 +327,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
     )
     amount_out_min_str: Optional[str] = route_meta.get("amount_out_min")
 
-    # ── 4. Fallback: fetch live quotes from Jupiter + Raydium ─────────────────
     if not swap_transaction:
         aggregators = _get_aggregators()
         if not aggregators:
@@ -509,7 +492,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                 )
             )
 
-    # ── 5. Sign the transaction ───────────────────────────────────────────────
     try:
         signed_tx: str = await sign_transaction_async(
             sub_org_id,
@@ -526,7 +508,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
             )
         ) from exc
 
-    # ── 6. Broadcast the transaction ──────────────────────────────────────────
     try:
         signature: str = await send_solana_transaction_async(
             signed_tx,
@@ -563,7 +544,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    # ── 7. Build result ───────────────────────────────────────────────────────
     amount_in_display = f"{amount_in:f}".rstrip("0").rstrip(".")
     message = (
         f"Done! Your swap of {amount_in_display} {token_in_symbol} "
@@ -580,8 +560,6 @@ async def solana_swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
 
     response = {
         "status": "success",
-        # Solana uses "signature" not "tx_hash" but we expose both so the
-        # existing executor telemetry (which reads tx_hash) keeps working.
         "tx_hash": signature,
         "signature": signature,
         "protocol": winning_aggregator,
@@ -610,7 +588,6 @@ def suggest_solana_swap_fix(
         current = float(args.get("slippage", 0.5))
 
         if _is_high_volatility_slippage(msg, current):
-            # ── High-volatility track ─────────────────────────────────────
             if current >= _VOLATILE_SLIPPAGE_MAX:
                 # Already at the absolute Solana cap — stop retrying.
                 return None
@@ -635,7 +612,6 @@ def suggest_solana_swap_fix(
             return new_args
 
         else:
-            # ── Normal token track ────────────────────────────────────────
             if current >= _NORMAL_SLIPPAGE_MAX:
                 # Hit the normal cap — stop retrying on this track.
                 return None

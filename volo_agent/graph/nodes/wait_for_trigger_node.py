@@ -110,7 +110,6 @@ async def wait_for_trigger_node(
 
     registry = TriggerRegistry()
 
-    # ── Separate conditional intents from plain action intents ────────────────
     conditional_intents = [i for i in intents if i.get("condition")]
     action_intents = [i for i in intents if not i.get("condition")]
 
@@ -123,7 +122,6 @@ async def wait_for_trigger_node(
         )
         return {"route_decision": "resolve"}
 
-    # ── Prepare the current trigger data ──────────────────────────────────────
     first_conditional = conditional_intents[0]
     condition_data = first_conditional.get("condition") or {}
 
@@ -183,7 +181,6 @@ async def wait_for_trigger_node(
     current_condition_hash = _hash_payload(trigger_condition_dict)
     current_intents_hash = _hash_payload(payload_intents)
 
-    # ── Idempotency: check if THIS specific trigger already exists ────────────
     existing_triggers = await registry.get_triggers_for_thread(thread_id)
     match_doc = None
     for t in existing_triggers:
@@ -230,7 +227,6 @@ async def wait_for_trigger_node(
             "Type 'status' to see all your pending orders."
         )
     else:
-        # ── First-time registration ───────────────────────────────────────────
         condition_desc = trigger_condition.description
         resume_token = _build_trigger_resume_token(
             thread_id=thread_id,
@@ -291,15 +287,6 @@ async def wait_for_trigger_node(
             "Type 'status' to check your pending orders."
         )
 
-    # ── Interrupt: pause the graph until the Observer sends resume ────────────
-    #
-    # First invocation:  LangGraph raises NodeInterrupt, saves checkpoint to
-    #                    MongoDB, and surfaces ``interrupt_value`` to the stream
-    #                    consumer.  Graph execution halts here.
-    #
-    # Resume invocation: ``interrupt()`` returns ``resume_payload`` immediately
-    #                    without raising.  Execution continues below.
-    #
     interrupt_value: dict[str, Any] = {
         "trigger_id": trigger_id,
         "message": interrupt_message,  # surfaced to the caller / bot layer
@@ -308,12 +295,6 @@ async def wait_for_trigger_node(
     }
 
     resume_payload: dict[str, Any] = interrupt(interrupt_value)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    #  Everything below this line only executes AFTER the Observer resumes the
-    #  thread via:  app.stream(Command(resume=resume_payload), config)
-    # ══════════════════════════════════════════════════════════════════════════
-
     condition_met: bool = bool(resume_payload.get("condition_met", False))
     resumed_trigger_id: str = resume_payload.get("trigger_id") or trigger_id
     submitted_resume_token = str(resume_payload.get("resume_token") or "").strip()
@@ -385,7 +366,6 @@ async def wait_for_trigger_node(
             ],
         }
 
-    # ── Build human-readable fired notification ───────────────────────────────
     if matched_price is not None and asset:
         direction = "dropped below" if "below" in trigger_type else "rose above"
         target = trigger_condition_dict.get("target", "")
@@ -399,10 +379,6 @@ async def wait_for_trigger_node(
             "Trigger condition met. Executing your pre-approved transaction now."
         )
 
-    # ── Clean intents: strip ``condition`` so the resolver handles them ───────
-    # The resolver doesn't know about conditions; it just processes plain intents.
-    # We prefer the stored ``payload.intents`` (registered at trigger creation)
-    # over re-deriving from state in case the user's message context changed.
     if stored_payload_intents:
         resolved_intents = stored_payload_intents
     else:
@@ -437,16 +413,12 @@ async def wait_for_trigger_node(
         ],
     }
 
-
-# ── Helper functions ──────────────────────────────────────────────────────────
-
-
 def _describe_condition(condition_dict: dict) -> str:
     try:
         condition = TriggerCondition(**condition_dict)
         return condition.description
     except Exception:
-        # Provide specific fallback info rather than just str(dict)
+        # Provide specific fallback info
         ctype = condition_dict.get("type", "unknown")
         asset = condition_dict.get("asset")
         target = condition_dict.get("target")

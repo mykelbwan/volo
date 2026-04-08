@@ -15,10 +15,6 @@ logger = logging.getLogger("volo.transfer_idempotency")
 
 @dataclass(frozen=True)
 class TransferIdempotencyClaim:
-    """
-    Result of claiming an idempotency key for a transfer submission.
-    """
-
     raw_key: str
     scoped_key: str
     request_hash: str
@@ -60,13 +56,6 @@ def build_deterministic_transfer_key(
     tool_name: str,
     request_fields: Mapping[str, Any],
 ) -> str:
-    """
-    Build a deterministic idempotency key for state-changing tool invocations.
-
-    The caller decides the scope fields (wallet, chain, token pair, amount,
-    destination, etc.). We hash the canonical payload so retries across
-    processes/instances converge on the same key.
-    """
     payload = {"tool_name": str(tool_name), **dict(request_fields)}
     return compute_args_hash(payload)
 

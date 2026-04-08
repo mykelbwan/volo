@@ -30,18 +30,15 @@ def _resolve_symbol(
     *,
     alias_lookup: dict[str, str],
 ) -> Optional[str]:
-    """
-    Resolves a symbol string to its canonical registry symbol using aliases.
-    """
     if not symbol:
         return None
 
     symbol_upper = symbol.upper()
-    # 1. Direct match
+    # Direct match
     if symbol_upper in token_registry:
         return symbol_upper
 
-    # 2. Alias match (case-insensitive)
+    # Alias match (case-insensitive)
     symbol_lower = symbol.lower()
     alias_match = alias_lookup.get(symbol_lower)
     if alias_match:
@@ -60,9 +57,6 @@ def _slot_symbol(slot: object) -> Optional[str]:
 
 
 def validate_intent(intent: Intent, token_registry: Dict) -> Intent:
-    """
-    Deterministically validates the Intent object after LLM parsing.
-    """
     alias_lookup = _build_alias_lookup(token_registry)
 
     if intent.intent_type == "balance":

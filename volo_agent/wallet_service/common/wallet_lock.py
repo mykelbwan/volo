@@ -11,7 +11,6 @@ from core.utils.upstash_client import get_async_redis, upstash_configured
 
 logger = logging.getLogger("volo.wallet_lock")
 
-# Constants
 _DEFAULT_LOCK_TTL_MS = 30_000
 _DEFAULT_ACQUIRE_TIMEOUT_MS = 45_000
 _DEFAULT_REFRESH_INTERVAL_MS = 10_000
@@ -19,7 +18,7 @@ _DEFAULT_BACKOFF_MIN_MS = 50
 _DEFAULT_BACKOFF_MAX_MS = 1_000
 _DEFAULT_REDIS_RETRY_ATTEMPTS = 3
 
-# Lua Scripts for Atomic Operations (kept compatible with test classifiers)
+# Lua Scripts for Atomic Operations 
 _RELEASE_LOCK_SCRIPT = """
 local key = KEYS[1]
 local owner = ARGV[1]
@@ -49,14 +48,6 @@ def _get_int_env(key: str, default: int) -> int:
 
 
 class WalletLock:
-    """
-    Redis-backed per-wallet execution lock.
-
-    This lock is required for correctness in multi-step EVM flows. It does not
-    rely on process-local state, and it fails closed if Redis is unavailable.
-    Uses exponential backoff with full jitter for acquisition.
-    """
-
     def __init__(
         self,
         *,
@@ -215,7 +206,7 @@ class WalletLock:
         raise last_error or RuntimeError("Retry loop failed unexpectedly")
 
     async def release(self) -> None:
-        # 1. Stop background refreshing first
+        # Stop background refreshing first
         refresh_task = self._refresh_task
         self._refresh_task = None
         self._stop_refresh.set()
@@ -226,7 +217,7 @@ class WalletLock:
             except asyncio.CancelledError:
                 pass
 
-        # 2. Atomic release in Redis
+        # Atomic release in Redis
         client = self._client
         if client is None:
             return

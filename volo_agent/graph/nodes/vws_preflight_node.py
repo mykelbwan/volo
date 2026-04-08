@@ -11,7 +11,7 @@ async def vws_preflight_node(state: AgentState) -> Dict[str, Any]:
     Deterministic VWS preflight stage.
 
     Runs the pure Virtual Wallet State simulation against the latest plan and
-    current balance snapshot inputs, then writes backward-compatible balance
+    current balance snapshot inputs, then writes balance
     and reservation metadata into AgentState for the downstream balance check.
     """
     return await run_vws_preflight(state)

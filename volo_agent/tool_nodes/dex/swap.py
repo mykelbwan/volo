@@ -320,7 +320,6 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
         invalid_recovery="use a slippage value between 0.01 and 50",
     )
 
-    # ── 2. Resolve chain and gas price ────────────────────────────────────────
     chain = get_chain_by_name(chain_name)
     idempotency_fields = {
         "sender": sender.strip().lower(),
@@ -382,7 +381,6 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
     has_trusted_precomputed_route = _is_trusted_precomputed_swap_route(route_meta)
 
     try:
-        # ── 3. Execute trusted precomputed route first (if available) ────────────
         quote = None
         remaining_candidates: list[tuple[str, Any]] = []
         simulation_errors: list[str] = []
@@ -475,7 +473,7 @@ async def swap_token(parameters: Dict[str, Any]) -> Dict[str, Any]:
                     f"({categorize_error(exc).value}): {exc}"
                 )
 
-        # ── 4. Simulate internal routes — V3 first, then V2 fallback ────────────
+        # Simulate internal routes — V3 first, then V2 fallback 
 
         internal_simulation_tasks: list[tuple[str, asyncio.Task[Any]]] = []
         if chain.v3_quoter and chain.v3_router:

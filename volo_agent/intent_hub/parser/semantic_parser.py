@@ -570,7 +570,7 @@ def _parse_missing_amount_swap_message(messages: Sequence[BaseMessage]) -> Seque
         token_out_raw = match.group("token_out")
         if _looks_pure_numeric(token_out_raw):
             continue
-        slots = {
+        slots: dict[str, object] = {
             "token_in": {"symbol": token_in_raw.upper()},
             "token_out": {"symbol": token_out_raw.upper()},
         }
@@ -681,7 +681,7 @@ def _parse_missing_amount_bridge_message(messages: Sequence[BaseMessage]) -> Seq
         token_in_raw = match.group("token_in")
         if _looks_pure_numeric(token_in_raw):
             continue
-        slots = {
+        slots: dict[str, object] = {
             "token_in": {"symbol": token_in_raw.upper()},
         }
         chain = match.groupdict().get("chain")

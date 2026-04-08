@@ -99,13 +99,6 @@ def get_cdp_client_config() -> CdpClientConfig:
 
 
 def run_async(coro):
-    """
-    Bridge sync callers to async CDP helpers.
-
-    Sync wrappers must never leak ``Task`` objects to callers. When invoked from
-    an active event loop we fail fast so the caller crosses the async boundary
-    explicitly instead of silently receiving a scheduled task.
-    """
     try:
         asyncio.get_running_loop()
     except RuntimeError:

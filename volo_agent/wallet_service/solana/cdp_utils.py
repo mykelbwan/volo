@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from solders.transaction import Transaction, VersionedTransaction
 
@@ -35,7 +35,7 @@ async def get_solana_account_async(account_name: str):
     account_name = require_non_empty_str(account_name, field="account_name")
     async with managed_cdp_client() as cdp:
         return await await_cdp_call(
-            cdp.solana.get_account(name=account_name),
+            cast(Any, cdp).solana.get_account(name=account_name),
             operation="loading Solana account",
         )
 
@@ -48,7 +48,7 @@ async def create_solana_account_async(account_name: str):
     account_name = require_non_empty_str(account_name, field="account_name")
     async with managed_cdp_client() as cdp:
         return await await_cdp_call(
-            cdp.solana.create_account(name=account_name),
+            cast(Any, cdp).solana.create_account(name=account_name),
             operation="creating Solana account",
         )
 
@@ -66,7 +66,7 @@ async def _get_solana_account_by_ref(cdp: Any, account_ref: str) -> Any:
     except Exception as name_exc:
         try:
             return await await_cdp_call(
-                cdp.solana.get_account(address=account_ref),
+                cast(Any, cdp).solana.get_account(address=account_ref),
                 operation="loading Solana account",
             )
         except Exception:
@@ -163,7 +163,7 @@ async def send_solana_transaction_async(
     _require_signed_solana_transaction(tx_b64)
     async with managed_cdp_client() as cdp:
         signature = await await_cdp_call(
-            cdp.solana.send_transaction(
+            cast(Any, cdp).solana.send_transaction(
                 network=normalize_solana_network(network),
                 transaction=tx_b64,
             ),
@@ -187,7 +187,7 @@ async def list_token_balances_async(
     wallet_address = require_non_empty_str(address, field="address")
     async with managed_cdp_client() as cdp:
         result = await await_cdp_call(
-            cdp.solana.list_token_balances(
+           cast(Any, cdp).solana.list_token_balances(
                 address=wallet_address,
                 network=normalize_solana_network(network),
             ),

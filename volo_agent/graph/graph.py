@@ -1,55 +1,3 @@
-"""
-Volo Agent – compiled LangGraph application.
-
-Node wiring
------------
-
-  START
-    └─► onboarding
-          ├─(end)──────────────────────────────────────────────────► END
-          └─(router)────────────────────────────────────────────────►
-                conversational_router
-                  ├─(end)─────────────────────────────────────────► END
-                  ├─(execute)─────────────────────────────────────►
-                  │           execution_engine ──► planner_node
-                  │                                    ├─(continue)─► execution_engine
-                  │                                    ├─(approval)─► confirmation_node ──► END
-                  │                                    └─(end)──────► END
-                  └─(parse)────────────────────────────────────────►
-                              intent_parser
-                                ├─(end)───────────────────────────► END  [slot-fill]
-                                ├─(wait_trigger)──────────────────►
-                                │   wait_for_trigger_node
-                                │     ├─(end)────────────────────► END  [cancelled/expired]
-                                │     └─(resolve)────────────────►
-                                │                  intent_resolver
-                                │                    └──────────────►
-                                │                                route_planner
-                                │                                  └──────────────►
-                                │                                      plan_optimizer
-                                │                                        └────────────►
-                                └─(resolve)───────────────────────►
-                                            intent_resolver
-                                              └──────────────────►
-                                                          route_planner
-                                                            └──────────────────►
-                                                                  plan_optimizer
-                                                                    └────────────►
-                                                                        balance_check
-                                                                          ├─(end)────────────────────────► END  [shortfall]
-                                                                          ├─(confirm)────────────────────►
-                                                                          │           confirmation_node ──► END
-                                                                          └─(execute)────────────────────►
-                                                                                      execution_engine ──► planner_node
-
-Persistence
------------
-MongoDBSaver replaces MemorySaver so that:
-  - Interrupted threads (wait_for_trigger_node) survive process restarts.
-  - Multiple Volo instances can serve the same user sessions.
-  - The ObserverWatcher service can resume sleeping threads from any process.
-"""
-
 import asyncio
 import inspect
 import os
@@ -154,44 +102,24 @@ workflow.add_node(
     ),
 )
 workflow.add_node("planner_node", wrap_node("planner_node", planner_node))
-
-# Entry point
 workflow.add_edge(START, "onboarding")
-
-# Onboarding: identify / provision user
-#   fail    → END
-#   success → conversational_router
 workflow.add_conditional_edges(
     "onboarding",
     _async_route(route_onboarding),
     {"end": END, "router": "conversational_router"},
-)
-
-# Conversational router: classify intent category
-#   CONVERSATION / STATUS / CANCELLED → END
-#   CONFIRMED (user approved receipt)  → execution_engine
-#   ACTION                             → intent_parser
+)  
 workflow.add_conditional_edges(
     "conversational_router",
     _async_route(route_main),
     {"end": END, "parse": "intent_parser", "execute": "execution_engine"},
 )
 
-# Parser: extract and validate intents from conversation history
-#   incomplete intents   → END  (clarification prompt already emitted)
-#   conditional intents  → wait_for_trigger  (event-driven path)
-#   all complete         → intent_resolver   (immediate execution path)
 workflow.add_conditional_edges(
     "intent_parser",
     _async_route(route_post_parse),
     {"end": END, "wait_trigger": "wait_for_trigger", "resolve": "intent_resolver"},
 )
 
-# Wait-for-trigger: register condition, interrupt graph, resume on event
-#   First invocation  → graph pauses here (interrupt); no edge fires.
-#   Resume invocation:
-#     resolve → intent_resolver  (condition met, proceed to execution)
-#     end     → END              (trigger cancelled / expired)
 workflow.add_conditional_edges(
     "wait_for_trigger",
     _async_route(route_after_trigger),
@@ -204,57 +132,30 @@ workflow.add_conditional_edges(
     {"resume": "vws_preflight", "end": END},
 )
 
-# Resolver: convert Intents → ExecutionPlan DAG
-#   resolve → route_planner
-#   end     → END
 workflow.add_conditional_edges(
     "intent_resolver",
     _async_route(route_after_resolver),
     {"resolve": "route_planner", "end": END},
 )
 
-# Route planner: deterministic bounded candidate generation.
-#   Produces routed candidate ExecutionPlans by combining topology variants
-#   with alternative quotes while keeping the baseline routed plan available
-#   for compatibility and fallback.
 workflow.add_edge("route_planner", "plan_optimizer")
 
-# Plan optimizer: simulate all candidates, score them, and pick the best plan.
-#   On total simulation failure the graph hands off to planner_node for
-#   mutation/retry; otherwise it proceeds to balance_check with the selected plan.
 workflow.add_conditional_edges(
     "plan_optimizer",
     _async_route(route_after_plan_optimizer),
     {"balance_check": "balance_check", "planner": "planner_node"},
 )
 
-# VWS preflight: simulate the latest ExecutionPlan against the current wallet
-# snapshot and attach projected deltas / reservation metadata. Always proceeds
-# to balance_check, which converts the VWS output into final fee-aware checks.
 workflow.add_edge("vws_preflight", "balance_check")
 
-# Balance check: verify token balances and estimate gas + platform fees
-#   confirm  → confirmation_node   (standard flow: show receipt to user)
-#   execute  → execution_engine    (triggered flow: skip receipt, auto-execute)
-#   end      → END                 (shortfall: error message already emitted)
 workflow.add_conditional_edges(
     "balance_check",
     _async_route(route_balance_check),
     {"confirm": "confirmation_node", "execute": "execution_engine", "end": END},
 )
 
-# Confirmation: present receipt, set confirmation_status = WAITING → END
-#   (User replies 'confirm' → conversational_router routes to execute on
-#   the next invocation — no direct edge needed here.)
 workflow.add_edge("confirmation_node", END)
-
-# Executor → Planner (DAG execution loop)
 workflow.add_edge("execution_engine", "planner_node")
-
-# Planner: analyse execution state and decide next step
-#   continue  → execution_engine    (more ready nodes in the DAG)
-#   approval  → confirmation_node   (planner added nodes requiring sign-off)
-#   end       → END                 (goal achieved or irrecoverably failed)
 workflow.add_conditional_edges(
     "planner_node",
     _async_route(route_planner),
@@ -265,18 +166,6 @@ workflow.add_conditional_edges(
         "end": END,
     },
 )
-
-#
-# MongoDBSaver persists LangGraph state across process restarts, enabling:
-#   1. Event-driven execution: wait_for_trigger_node can survive restarts
-#      because the checkpoint (including the interrupted node position) is
-#      durably stored in MongoDB rather than process memory.
-#   2. Multi-instance deployments: any Volo instance can resume a thread
-#      started by a different instance, since all share the same MongoDB.
-#   3. Auditability: the full execution history of every user thread is
-#      queryable from the lg_checkpoints collection.
-#
-# Uses MemorySaver only when SKIP_MONGODB_HEALTHCHECK is explicitly enabled.
 
 checkpoint_serde = JsonPlusSerializer(
     allowed_msgpack_modules=()

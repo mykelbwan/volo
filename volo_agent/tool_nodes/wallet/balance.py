@@ -726,13 +726,6 @@ def _supported_chain_examples() -> str:
 
 
 async def check_balance(parameters: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Fetch and format wallet balances.
-
-    Supports two modes:
-      1. Single-chain:  ``chain=<network>``
-      2. Multi-chain:   ``chain=all_supported``
-    """
     chain_raw = _clean_optional(parameters.get("chain"))
     if not chain_raw:
         raise ValueError(

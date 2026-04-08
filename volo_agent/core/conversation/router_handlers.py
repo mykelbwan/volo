@@ -98,7 +98,9 @@ def _format_wallet_address_response(
         "evm": "evm_address",  # For clarity, though we also pass it as an argument
     }
 
-    address_key = chain_key_map.get(requested_chain) if requested_chain is not None else None
+    address_key = (
+        chain_key_map.get(requested_chain) if requested_chain is not None else None
+    )
     address = _get_state_address(state, address_key) if address_key else None
 
     # Fallback for EVM if not in mapping or missing from state but passed as argument
@@ -432,7 +434,10 @@ async def _handle_cancellation(
     *,
     helpers: RouterNodeHelpers,
 ) -> Dict[str, Any] | None:
-    if not (helpers.is_cancel_request(last_user_msg) or is_task_cancel_request(last_user_msg)):
+    if not (
+        helpers.is_cancel_request(last_user_msg)
+        or is_task_cancel_request(last_user_msg)
+    ):
         return None
 
     execution_state = state.get("execution_state")
@@ -977,17 +982,19 @@ async def handle_account_requests(
                     )
                 ],
             }
-        
+
         # Performance/Milestone 3 Optimization:
-        # If we have both a chain and a specific token (fully qualified), 
+        # If we have both a chain and a specific token (fully qualified),
         # we can fast-path to the balance tool instead of the full planner.
         if account_query.chain:
             evm_addr = helpers.get_sender_address(state)
             user_info = state.get("user_info") or {}
-            sol_addr = user_info.get("solana_address") if isinstance(user_info, dict) else None
-            
+            sol_addr = (
+                user_info.get("solana_address") if isinstance(user_info, dict) else None
+            )
+
             return {
-                "route_decision": "ACTION", 
+                "route_decision": "ACTION",
                 "parse_scope": "last_user",
                 "pending_intent": {
                     "intent_type": "balance",
@@ -996,7 +1003,7 @@ async def handle_account_requests(
                         "token": account_query.token,
                         "sender": evm_addr,
                         "solana_address": sol_addr,
-                    }
+                    },
                 },
                 "pending_intent_queue": None,
                 "pending_clarification": None,
@@ -1085,9 +1092,7 @@ async def _handle_unlink_request(
 
     user_info = state.get("user_info") or {}
     identities = (
-        list(user_info.get("identities") or [])
-        if isinstance(user_info, dict)
-        else []
+        list(user_info.get("identities") or []) if isinstance(user_info, dict) else []
     )
     if not identities:
         return {
@@ -1168,9 +1173,7 @@ async def _handle_unlink_request(
                         "Tell me exactly which one to unlink."
                         + (
                             " Try "
-                            + " or ".join(
-                                f"'{example}'" for example in examples[:3]
-                            )
+                            + " or ".join(f"'{example}'" for example in examples[:3])
                             + "."
                             if examples
                             else ""
@@ -1220,8 +1223,7 @@ async def _handle_unlink_request(
         content = "This account has been unlinked."
     elif remaining_count == 1:
         content = (
-            "This account has been unlinked. "
-            "One linked account remains on your wallet."
+            "This account has been unlinked. One linked account remains on your wallet."
         )
     else:
         content = (

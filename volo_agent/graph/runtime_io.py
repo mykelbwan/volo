@@ -16,12 +16,6 @@ def build_turn_input(
     selected_task_number: int | None = None,
     context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    """
-    Build the per-turn graph input payload for an incoming user message.
-
-    This keeps turn ingestion (HumanMessage + identity/context envelope) in
-    shared runtime code so adapters (CLI, webhooks, bots) all use one path.
-    """
     ctx: Dict[str, Any] = dict(context or {})
     if thread_id and not ctx.get("thread_id"):
         ctx["thread_id"] = thread_id

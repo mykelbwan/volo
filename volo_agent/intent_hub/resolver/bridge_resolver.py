@@ -1,3 +1,8 @@
+from decimal import Decimal
+from typing import cast
+
+from config.chains import get_chain_by_name
+from core.token_security.registry_lookup import get_registry_decimals_by_address_async
 from intent_hub.ontology.intent import ExecutionPlan, Intent
 from intent_hub.registry.token_service import (
     get_address_for_chain_async,
@@ -12,8 +17,6 @@ from intent_hub.resolver.common import (
     unresolved_addresses_error,
 )
 from intent_hub.utils.amount import to_wei
-from config.chains import get_chain_by_name
-from core.token_security.registry_lookup import get_registry_decimals_by_address_async
 from intent_hub.utils.messages import format_with_recovery, require_non_empty_str
 
 
@@ -59,7 +62,9 @@ async def resolve_bridge(intent: Intent) -> ExecutionPlan:
     target_address = await get_address_for_chain_async(token_data, target_chain)
     if not target_address:
         discovered_target = await get_token_data_async(symbol_resolved, target_chain)
-        target_address = await get_address_for_chain_async(discovered_target, target_chain)
+        target_address = await get_address_for_chain_async(
+            discovered_target, target_chain
+        )
 
     if not source_address or not target_address:
         raise unresolved_addresses_error(
@@ -88,7 +93,7 @@ async def resolve_bridge(intent: Intent) -> ExecutionPlan:
     if is_dynamic_marker(amount_val):
         amount_in_wei = amount_val
     else:
-        amount_in_wei = str(to_wei(amount_val, decimals))
+        amount_in_wei = str(to_wei(cast(Decimal | str, amount_val), decimals))
 
     return ExecutionPlan(
         intent_type="bridge",

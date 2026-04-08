@@ -19,45 +19,11 @@ from tool_nodes.dex.swap_simulator_common import (
     _resolve_chain,
 )
 
-# ---------------------------------------------------------------------------
-# Pool fee tiers supported by Uniswap V3 (in hundredths of a bip)
-# 100   = 0.01%  — stable pairs (e.g. USDC/USDT)
-# 500   = 0.05%  — stable-ish pairs (e.g. ETH/USDC)
-# 3000  = 0.30%  — standard pairs
-# 10000 = 1.00%  — exotic / low-liquidity pairs
-# ---------------------------------------------------------------------------
 FEE_TIERS = [100, 500, 3000, 10000]
 
 
 @dataclass
 class SwapQuoteV3:
-    """
-    The result of a simulated Uniswap V3 swap.
-
-    Attributes:
-        token_in:           Address of the input token (or zero address for native).
-        token_out:          Address of the output token (or zero address for native).
-        amount_in:          Exact input amount in human-readable units.
-        amount_out:         Expected output amount in human-readable units.
-        amount_out_minimum: Minimum acceptable output after slippage is applied.
-        decimals_in:        Decimals for the input token.
-        decimals_out:       Decimals for the output token.
-        slippage_pct:       Slippage tolerance used (e.g. Decimal('0.5') = 0.5%).
-        price_impact_pct:   Estimated price impact of the swap.
-        fee_tiers:          List of fee tiers used per hop.
-                            Single-hop: [3000]
-                            Multi-hop:  [500, 3000]  (token_in->WETH fee, WETH->token_out fee)
-        gas_estimate:       Gas units estimated by the quoter contract.
-        needs_approval:     True if the router does not yet have sufficient allowance.
-        allowance:          Current router allowance in raw token units.
-        chain_id:           EIP-155 chain ID this quote is for.
-        chain_name:         Human-readable chain name.
-        route:              "single-hop" or "multi-hop".
-        path:               Human-readable token address path used for the swap.
-                            Single-hop: ["0xTokenIn", "0xTokenOut"]
-                            Multi-hop:  ["0xTokenIn", "0xWETH", "0xTokenOut"]
-    """
-
     token_in: str
     token_out: str
     amount_in: Decimal
@@ -79,24 +45,11 @@ class SwapQuoteV3:
 
 @dataclass
 class SimulationError:
-    """
-    Returned when the simulation fails for a known, user-facing reason.
-
-    Attributes:
-        reason:  Short machine-readable reason code.
-        message: Human-readable explanation.
-    """
-
     reason: str
     message: str
 
 
 def _resolve_token_address(address: str, chain: ChainConfig) -> str:
-    """
-    If address is the native token placeholder, return the chain's wrapped
-    native address (WETH, WMATIC, etc.) so the quoter can work with it.
-    The router handles the native -> wrapped wrapping transparently.
-    """
     if _is_zero_native(address):
         if not chain.wrapped_native:
             raise ValueError(

@@ -69,14 +69,14 @@ def add_messages_bounded(left, right):
 
 
 class AgentState(TypedDict):
-    user_id: str  # Platform-specific ID (Telegram ID, Discord ID, etc)
-    provider: str  # The platform provider (e.g. 'telegram', 'discord', 'web')
-    username: Optional[str]  # Platform-specific username
-    user_info: Optional[Dict[str, Any]]  # volo_user_id, wallet address, sub_org_id, etc
+    user_id: str  
+    provider: str  
+    username: Optional[str] 
+    user_info: Optional[Dict[str, Any]]  
     intents: List[Dict[str, Any]]
     plans: List[Dict[str, Any]]
-    goal_parameters: Dict[str, Any]  # Persistent context for the goal
-    plan_history: Annotated[List[ExecutionPlan], add_logs]  # Historical DAGs
+    goal_parameters: Dict[str, Any] 
+    plan_history: Annotated[List[ExecutionPlan], add_logs] 
     candidate_plans: Optional[List[ExecutionPlan]]
     execution_state: Annotated[Optional[ExecutionState], merge_execution_state]
     artifacts: dict
@@ -84,7 +84,7 @@ class AgentState(TypedDict):
     route_decision: Optional[str]
     confirmation_status: Optional[str]
     pending_transactions: List[dict]
-    reasoning_logs: Annotated[List[str], add_logs]  # Internal system logs
+    reasoning_logs: Annotated[List[str], add_logs] 
     messages: Annotated[List[BaseMessage], add_messages_bounded]
     fee_quotes: Optional[List[Dict[str, Any]]]
     balance_snapshot: Optional[Dict[str, str]]

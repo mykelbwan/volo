@@ -18,8 +18,7 @@ async def get_token_balance_async(
                 "provide decimals as a non-negative integer and retry",
             )
         )
-    # Reuse the shared AsyncWeb3 transport so frequent token lookups do not
-    # rebuild HTTP connection pools on the hot path.
+    
     w3 = await get_shared_async_web3(provider)
     try:
         checksum_wallet = w3.to_checksum_address(address)

@@ -24,7 +24,6 @@ _BLOCKHASH_IN_FLIGHT: dict[str, Future[Any]] = {}
 
 
 async def get_shared_solana_client(rpc_url: str) -> Any:
-    """Return one long-lived AsyncClient per event loop and RPC URL."""
     from solana.rpc.async_api import AsyncClient as SolanaClient
 
     normalized_rpc_url = str(rpc_url).strip()
@@ -38,7 +37,6 @@ async def get_shared_solana_client(rpc_url: str) -> Any:
 
 
 async def close_shared_solana_clients() -> None:
-    """Close pooled Solana AsyncClient instances for graceful shutdown"""
     with _SHARED_SOLANA_CLIENTS_LOCK:
         clients = list(_SHARED_SOLANA_CLIENTS.values())
         _SHARED_SOLANA_CLIENTS.clear()
@@ -51,13 +49,11 @@ async def close_shared_solana_clients() -> None:
 
 
 def invalidate_cached_blockhash(rpc_url: str) -> None:
-    """Force the next blockhash lookup for an RPC URL to refresh from the node."""
     with _BLOCKHASH_CACHE_LOCK:
         _BLOCKHASH_CACHE.pop(str(rpc_url).strip(), None)
 
 
 async def get_cached_latest_blockhash(rpc_url: str) -> Any:
-    """Return a recent blockhash using a low-risk TTL cache to cut RPC load."""
     normalized_rpc_url = str(rpc_url).strip()
     with _BLOCKHASH_CACHE_LOCK:
         cached = _BLOCKHASH_CACHE.get(normalized_rpc_url)

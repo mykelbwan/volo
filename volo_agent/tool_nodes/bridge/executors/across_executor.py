@@ -186,17 +186,17 @@ def _build_deposit_tx(
         spoke_pool,
         "depositV3",
         [
-            checksum_sender,  # depositor
-            checksum_recipient,  # recipient
-            checksum_input_token,  # inputToken
-            checksum_output_token,  # outputToken
-            input_amount_raw,  # inputAmount
-            output_amount_raw,  # outputAmount
-            quote.dest_chain_id,  # destinationChainId
-            checksum_relayer,  # exclusiveRelayer
-            quote.quote_timestamp,  # quoteTimestamp  (uint32)
-            quote.fill_deadline,  # fillDeadline    (uint32)
-            quote.exclusivity_deadline,  # exclusivityDeadline (uint32)
+            checksum_sender,  
+            checksum_recipient,  
+            checksum_input_token,  
+            checksum_output_token,  
+            input_amount_raw,  
+            output_amount_raw, 
+            quote.dest_chain_id,  
+            checksum_relayer,  
+            quote.quote_timestamp,  
+            quote.fill_deadline,  
+            quote.exclusivity_deadline,  
             b"",  # message (empty — no cross-chain call)
         ],
     )

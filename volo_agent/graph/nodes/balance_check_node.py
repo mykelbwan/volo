@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import threading
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -23,7 +22,6 @@ from core.planning.vws_execution import VWSFailure, simulate_execution_plan
 from core.reservations.common import normalize_wallet_scope, resource_key
 from core.reservations.service import get_reservation_service
 from core.token_security.registry_lookup import (
-    get_registry_decimals_by_address,
     get_registry_decimals_by_address_async,
 )
 from core.token_security.token_db import (
@@ -86,17 +84,7 @@ class _BalanceChainContext:
 
 
 def _is_native(address: str, chain) -> bool:
-    # Stop conflating native (e.g., ETH) and wrapped (e.g., WETH) assets.
-    # While they are economically linked, they are distinct on-chain resources.
     return str(address or "").strip().lower() == _NATIVE
-
-
-def _resolve_chain_name(args: Dict[str, Any]) -> str | None:
-    raw_chain = args.get("chain") or args.get("network")
-    if raw_chain is None:
-        return None
-    chain_name = str(raw_chain).strip()
-    return chain_name or None
 
 
 def _resolve_balance_chain(args: Dict[str, Any]) -> _BalanceChainContext | None:
@@ -384,22 +372,17 @@ async def _get_solana_token_balance_and_decimals(
     chain_cfg = get_solana_chain(network)
     chain_id = chain_cfg.chain_id
 
-    # 1. Check registry (async)
     cached = await get_registry_decimals_by_address_async(token_ref, chain_id)
     if cached is not None:
         return available, int(cached)
 
-    # 2. Fallback to on-chain decimals() check
     decimals_int = await fetch_solana_token_decimals(token_ref, chain_cfg.rpc_url)
 
-    # 3. Persist to registry if it was missing (and we have a valid registry)
     registry = get_async_token_registry()
     if registry is not None:
         try:
-            # We create a minimal entry for the registry.
-            # Using token_ref as symbol if unknown, but usually we just care about decimals here.
             entry = TokenRegistryEntry(
-                symbol=token_ref[:12].upper(),  # Placeholder symbol
+                symbol=token_ref[:12].upper(),
                 chain_name=chain_cfg.name.lower(),
                 chain_id=chain_id,
                 address=token_ref,
@@ -439,7 +422,6 @@ async def _get_token_balance_for_chain(
     if token_balance_cache is not None and balance_key in token_balance_cache:
         available = token_balance_cache[balance_key]
         symbol = str(token_symbol_hint or token_ref[:8])
-        # We don't re-record resource snapshots here as the first fetch already did it.
         return balance_key, symbol, available
 
     if chain_ctx.family == "evm":

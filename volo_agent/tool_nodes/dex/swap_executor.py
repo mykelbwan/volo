@@ -40,8 +40,6 @@ from wallet_service.evm.nonce_manager import (
 )
 from wallet_service.evm.sign_tx import sign_transaction_async
 
-# Deadline buffer: how far in the future the swap deadline is set (seconds).
-# 20 minutes is the standard used by Uniswap's own frontend.
 _DEADLINE_BUFFER_SECONDS = 20 * 60
 # Use max uint256 as the approval amount so the user only ever needs to approve once.
 _MAX_UINT256 = 2**256 - 1
@@ -53,8 +51,6 @@ _SWAP_GAS_BUFFER = 1.2
 _SWAP_GAS_FALLBACK_EXTRA = 50_000
 # Keep 1inch disabled until API/KYC is ready.
 _PRECOMPUTED_SWAP_ALLOWLIST = frozenset({"0x", "paraswap"})
-
-# The zero address — used to identify native token swaps.
 _NATIVE = "0x0000000000000000000000000000000000000000"
 
 
@@ -75,7 +71,6 @@ class SwapResult:
 
 
 def _deadline() -> int:
-    """Return a Unix timestamp 20 minutes from now, suitable for swap deadlines."""
     return int(time.time()) + _DEADLINE_BUFFER_SECONDS
 
 
@@ -249,10 +244,6 @@ async def _build_approve_tx(
     max_priority_fee_per_gas: int,
     chain_id: int,
 ) -> dict:
-    """
-    Build an unsigned ERC-20 approve(spender, MAX_UINT256) transaction dict.
-    Using MAX_UINT256 means the user only needs to approve once per token/router pair.
-    """
     contract = w3.eth.contract(
         address=w3.to_checksum_address(token_address),
         abi=ERC20_ABI,
@@ -390,13 +381,6 @@ async def _maybe_approve(
     wallet_execution_lock: Any | None = None,
     persist_step_submission: Callable[[str], Awaitable[None]] | None = None,
 ) -> str | None:
-    """
-    If the quote indicates an approval is needed, build, sign, and broadcast
-    an ERC-20 approve tx before the swap.
-
-    Returns:
-        approve_tx_hash or None
-    """
     native_in = _is_native(quote.token_in, chain)
     supports_native = _supports_native_swaps(chain, supports_native)
 
@@ -479,11 +463,6 @@ async def _maybe_approve(
         )
 
     return approve_hash
-
-
-# ---------------------------------------------------------------------------
-# V2 calldata builder
-# ---------------------------------------------------------------------------
 
 
 async def _build_v2_swap_tx(
@@ -579,10 +558,6 @@ async def _build_v2_swap_tx(
 
 
 def _encode_v3_path(path: list[str], fee_tiers: list[int]) -> bytes:
-    """
-    Encode a V3 swap path for exactInput (multi-hop).
-    Format: token0 (20b) + fee (3b) + token1 (20b) [+ fee (3b) + tokenN (20b) ...]
-    """
     result = bytes.fromhex(path[0][2:])
     for fee, token in zip(fee_tiers, path[1:]):
         result += fee.to_bytes(3, byteorder="big")
@@ -627,12 +602,12 @@ async def _build_v3_swap_tx(
             "exactInputSingle",
             [
                 (
-                    w3.to_checksum_address(token_in_addr),  # tokenIn
-                    w3.to_checksum_address(token_out_addr),  # tokenOut
-                    fee_tier,  # fee
-                    checksum_sender,  # recipient
-                    amount_in_raw,  # amountIn
-                    amount_out_min_raw,  # amountOutMinimum
+                    w3.to_checksum_address(token_in_addr),  
+                    w3.to_checksum_address(token_out_addr),  
+                    fee_tier,  
+                    checksum_sender,  
+                    amount_in_raw,  
+                    amount_out_min_raw,  
                     0,  # sqrtPriceLimitX96 (no limit)
                 )
             ],
@@ -693,10 +668,6 @@ async def _build_probe_tx(
     max_priority_fee_per_gas: int,
     chain,
 ) -> dict:
-    """
-    Build a swap tx for eth_call probing with amountOutMin = 0.
-    Always builds the native swap path to detect native swap support.
-    """
     probe_quote = replace(quote, amount_out_minimum=Decimal("0"))
     if isinstance(probe_quote, SwapQuoteV3):
         return await _build_v3_swap_tx(
@@ -743,10 +714,6 @@ async def _probe_native_swap_support(
     max_priority_fee_per_gas: int,
     chain,
 ) -> bool:
-    """
-    Return True if the router appears to support native swaps, False otherwise.
-    Uses eth_call with amountOutMin=0 to avoid slippage-related reverts.
-    """
     try:
         unsigned = await _build_probe_tx(
             w3=w3,
@@ -878,7 +845,9 @@ async def execute_precomputed_swap_route(
         nonce = await nonce_manager.allocate_safe(checksum_sender, chain.chain_id, w3)
         route_gas_estimate = _safe_int(route_meta.get("gas_estimate"), 0)
         if route_gas_estimate > 0:
-            gas_limit = int(route_gas_estimate * _SWAP_GAS_BUFFER) + _SWAP_GAS_FALLBACK_EXTRA
+            gas_limit = (
+                int(route_gas_estimate * _SWAP_GAS_BUFFER) + _SWAP_GAS_FALLBACK_EXTRA
+            )
         else:
             try:
                 estimate = await w3.eth.estimate_gas(
@@ -907,7 +876,9 @@ async def execute_precomputed_swap_route(
             "chainId": chain.chain_id,
             "type": "0x2",
         }
-        signed_tx = await sign_transaction_async(sub_org_id, unsigned_tx, checksum_sender)
+        signed_tx = await sign_transaction_async(
+            sub_org_id, unsigned_tx, checksum_sender
+        )
 
         await execution_lock.ensure_held()
         try:

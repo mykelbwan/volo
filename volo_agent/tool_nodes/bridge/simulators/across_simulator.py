@@ -334,9 +334,6 @@ async def fetch_across_available_routes_async(
     token_symbol: str,
     protocol: BridgeProtocolConfig = ACROSS,
 ) -> list[BridgeRoute]:
-    """
-    Async version of fetch_across_available_routes.
-    """
     symbol = token_symbol.upper().strip()
     try:
         source_chain = get_chain_by_id(source_chain_id)
