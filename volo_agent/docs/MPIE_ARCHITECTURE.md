@@ -251,7 +251,7 @@ Paused waits require an external host to call `Command(resume=...)`.
 Current implementation supports that through reusable runtimes:
 
 - funds wait polling:
-  [core/reservations/funds_wait_runtime.py](/home/michael/dev-space/aura/volo_agent/core/reservations/funds_wait_runtime.py)
+  [core/reservations/funds_wait_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/funds_wait_runtime.py)
 - funds wait resume transaction:
   [core/reservations/wait_resume_runtime.py](/home/michael/dev-space/aura/volo_agent/core/reservations/wait_resume_runtime.py)
 - bridge worker outer loop:
