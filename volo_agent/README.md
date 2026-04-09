@@ -4,11 +4,11 @@
 
 Architecture docs
 
-docs/MPIE_ARCHITECTURE - conversational-level MPIE architecture, wait/resume flow, and security model.
-docs/DAG_ARCHITECTURE - DAG planning, scheduling, mutation, and execution-state model.
-docs/DESIGN_PRINCIPLES - project design principles and implementation constraints.
-docs/BRIDGE_STATUS_WORKER - bridge status worker notes.
-docs/REV_GEN_PATHS - revision generation path notes.
+[docs/MPIE_ARCHITECTURE.md][docs/MPIE_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/MPIE_ARCHITECTURE.md) - conversational-level MPIE architecture, wait/resume flow, and security model.
+
+[docs/DAG_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/DAG_ARCHITECTURE.md) - DAG planning, scheduling, mutation, and execution-state model.
+
+[docs/BRIDGE_STATUS_WORKER.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/BRIDGE_STATUS_WORKER.md) - bridge status worker notes.
 <!--
 Admin scripts
 

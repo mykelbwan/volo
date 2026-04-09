@@ -41,24 +41,24 @@ User Conversation
 ### Core Components
 
 - Conversation/task routing:
-  [core/tasks/thread_resolver.py](/home/michael/dev-space/aura/volo_agent/core/tasks/thread_resolver.py),
-  [core/tasks/conversation_runtime.py](/home/michael/dev-space/aura/volo_agent/core/tasks/conversation_runtime.py),
-  [core/tasks/router.py](/home/michael/dev-space/aura/volo_agent/core/tasks/router.py)
+  [core/tasks/thread_resolver.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/tasks/thread_resolver.py),
+  [core/tasks/conversation_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/tasks/conversation_runtime.py),
+  [core/tasks/router.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/tasks/router.py)
 - LangGraph workflow:
-  [graph/graph.py](/home/michael/dev-space/aura/volo_agent/graph/graph.py)
+  [graph/graph.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/graph.py)
 - Planner and execution routing:
-  [graph/nodes/planner_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/planner_node.py),
-  [graph/nodes/routing.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/routing.py)
+  [graph/nodes/planner_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/planner_node.py),
+  [graph/nodes/routing.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/routing.py)
 - Execution runtime:
-  [core/execution/runtime.py](/home/michael/dev-space/aura/volo_agent/core/execution/runtime.py)
+  [core/execution/runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/execution/runtime.py)
 - Global wallet reservations and funds queue:
-  [core/reservations/service.py](/home/michael/dev-space/aura/volo_agent/core/reservations/service.py),
-  [core/reservations/store.py](/home/michael/dev-space/aura/volo_agent/core/reservations/store.py),
-  [core/reservations/models.py](/home/michael/dev-space/aura/volo_agent/core/reservations/models.py)
+  [core/reservations/service.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/service.py),
+  [core/reservations/store.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/store.py),
+  [core/reservations/models.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/models.py)
 - Funds wait pause/resume:
-  [graph/nodes/wait_for_funds_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/wait_for_funds_node.py),
-  [core/reservations/funds_wait_runtime.py](/home/michael/dev-space/aura/volo_agent/core/reservations/funds_wait_runtime.py),
-  [core/reservations/wait_resume_runtime.py](/home/michael/dev-space/aura/volo_agent/core/reservations/wait_resume_runtime.py)
+  [graph/nodes/wait_for_funds_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/wait_for_funds_node.py),
+  [core/reservations/funds_wait_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/funds_wait_runtime.py),
+  [core/reservations/wait_resume_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/wait_resume_runtime.py)
 
 ## Conversation-Level MPIE
 
@@ -107,8 +107,8 @@ Before a spend-capable node executes, the runtime tries to claim wallet resource
 
 This step is handled in:
 
-- [core/execution/runtime.py](/home/michael/dev-space/aura/volo_agent/core/execution/runtime.py)
-- [core/reservations/service.py](/home/michael/dev-space/aura/volo_agent/core/reservations/service.py)
+- [core/execution/runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/execution/runtime.py)
+- [core/reservations/service.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/service.py)
 
 The reservation manager:
 
@@ -253,11 +253,11 @@ Current implementation supports that through reusable runtimes:
 - funds wait polling:
   [core/reservations/funds_wait_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/funds_wait_runtime.py)
 - funds wait resume transaction:
-  [core/reservations/wait_resume_runtime.py](/home/michael/dev-space/aura/volo_agent/core/reservations/wait_resume_runtime.py)
+  [core/reservations/wait_resume_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/reservations/wait_resume_runtime.py)
 - bridge worker outer loop:
-  [core/bridge_status_worker_runtime.py](/home/michael/dev-space/aura/volo_agent/core/bridge_status_worker_runtime.py)
+  [core/bridge_status_worker_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/bridge_status_worker_runtime.py)
 - event notifier loop:
-  [core/event_notifier_runtime.py](/home/michael/dev-space/aura/volo_agent/core/event_notifier_runtime.py)
+  [core/event_notifier_runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/event_notifier_runtime.py)
 
 This is intentional so FastAPI or another host can import the runtime directly instead of depending on script files.
 
