@@ -4,7 +4,7 @@
 
 Architecture docs
 
-[docs/MPIE_ARCHITECTURE.md][docs/MPIE_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/MPIE_ARCHITECTURE.md) - conversational-level MPIE architecture, wait/resume flow, and security model.
+[docs/MPIE_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/MPIE_ARCHITECTURE.md) - conversational-level MPIE architecture, wait/resume flow, and security model.
 
 [docs/DAG_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/DAG_ARCHITECTURE.md) - DAG planning, scheduling, mutation, and execution-state model.
 
