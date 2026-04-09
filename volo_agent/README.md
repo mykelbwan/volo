@@ -19,8 +19,3 @@ Usage:
     python volo_agent/scripts/update_fee_table.py --input path/to/table.csv --deploy
 
 The script validates rows and writes a canonical JSON file suitable for the VWS FeeTable loader.-->
-docs/MPIE_ARCHITECTURE — conversational-level MPIE architecture, wait/resume flow, and security model.
-docs/DAG_ARCHITECTURE — DAG planning, scheduling, mutation, and execution-state model.
-docs/DESIGN_PRINCIPLES — project design principles and implementation constraints.
-docs/BRIDGE_STATUS_WORKER — bridge status worker notes.
-docs/REV_GEN_PATHS — revision generation path notes.
