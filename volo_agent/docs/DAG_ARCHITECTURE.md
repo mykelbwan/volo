@@ -20,10 +20,10 @@ It covers:
 
 Primary implementation references:
 
-- [core/planning/execution_plan.py](/home/michael/dev-space/aura/volo_agent/core/planning/execution_plan.py)
-- [graph/nodes/resolver_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/resolver_node.py)
-- [core/execution/runtime.py](/home/michael/dev-space/aura/volo_agent/core/execution/runtime.py)
-- [graph/nodes/planner_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/planner_node.py)
+- [core/planning/execution_plan.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/planning/execution_plan.py)
+- [graph/nodes/resolver_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/resolver_node.py)
+- [core/execution/runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/execution/runtime.py)
+- [graph/nodes/planner_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/planner_node.py)
 
 ## Overview
 
@@ -69,7 +69,7 @@ This is closer to workflow engines such as Temporal/Airflow-style DAG thinking t
 
 `PlanNode` is the unit of execution.
 
-Defined in [execution_plan.py](/home/michael/dev-space/aura/volo_agent/core/planning/execution_plan.py).
+Defined in [execution_plan.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/planning/execution_plan.py).
 
 Fields:
 
@@ -154,7 +154,7 @@ Implemented in [execution_plan.py](/home/michael/dev-space/aura/volo_agent/core/
 
 ### Intent Resolution
 
-The resolver converts resolved intents into `PlanNode`s in [resolver_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/resolver_node.py).
+The resolver converts resolved intents into `PlanNode`s in [resolver_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/resolver_node.py).
 
 The process is:
 
@@ -220,7 +220,7 @@ This prevents unsafe over-parallelization while still allowing useful concurrenc
 
 ### Ready Node Definition
 
-`get_ready_nodes()` defines readiness in [execution_plan.py](/home/michael/dev-space/aura/volo_agent/core/planning/execution_plan.py).
+`get_ready_nodes()` defines readiness in [execution_plan.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/planning/execution_plan.py).
 
 A node is ready when:
 
@@ -239,7 +239,7 @@ This gives simple and deterministic scheduling semantics.
 
 ### Runtime Loop
 
-The execution runtime in [runtime.py](/home/michael/dev-space/aura/volo_agent/core/execution/runtime.py) operates as a frontier scheduler.
+The execution runtime in [runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/execution/runtime.py) operates as a frontier scheduler.
 
 Each pass:
 
@@ -284,7 +284,7 @@ This keeps node updates composable and predictable.
 
 Arguments can contain dynamic markers that are resolved at execution time.
 
-Implemented in [execution_plan.py](/home/michael/dev-space/aura/volo_agent/core/planning/execution_plan.py) via `resolve_dynamic_args()`.
+Implemented in [execution_plan.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/planning/execution_plan.py) via `resolve_dynamic_args()`.
 
 Resolution sources include:
 
@@ -304,7 +304,7 @@ The DAG therefore supports deferred value binding.
 
 ### Planner Role
 
-The planner in [planner_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/planner_node.py) is the control plane for the DAG.
+The planner in [planner_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/planner_node.py) is the control plane for the DAG.
 
 It does not execute tools. It decides whether to:
 
@@ -457,9 +457,9 @@ In industry-standard workflow terms, the current implementation maps to:
 - scheduler:
   `get_ready_nodes()` plus runtime frontier loop
 - executor:
-  tool runtime in [runtime.py](/home/michael/dev-space/aura/volo_agent/core/execution/runtime.py)
+  tool runtime in [runtime.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/core/execution/runtime.py)
 - control plane:
-  planner in [planner_node.py](/home/michael/dev-space/aura/volo_agent/graph/nodes/planner_node.py)
+  planner in [planner_node.py](https://github.com/mykelbwan/volo/blob/master/volo_agent/graph/nodes/planner_node.py)
 - admission / safety gates:
   guardrails, idempotency, reservations, approvals
 
