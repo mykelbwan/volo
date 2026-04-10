@@ -35,9 +35,7 @@ from core.routing.route_meta import (
     log_execution_comparison,
     log_route_expiry,
     log_route_validation,
-    # route_meta_matches_node,
     route_meta_required,
-    # resolve_route_chain_id,
     route_meta_strictly_enforced,
     validate_route_meta,
 )
@@ -124,11 +122,6 @@ def _side_effect_cooldown_active(key: str) -> bool:
 def _trip_side_effect_cooldown(key: str, *, seconds: float) -> None:
     _side_effect_cooldowns[str(key)] = time.monotonic() + max(0.0, seconds)
 
-
-# def _clear_route_fast_path(route_meta: Dict[str, Any]) -> Dict[str, Any]:
-#     return {k: v for k, v in route_meta.items() if k not in _ROUTE_FAST_PATH_KEYS}
-
-
 def _find_unresolved_marker(value: Any, *, path: str = "args") -> str | None:
     if isinstance(value, str) and "{{" in value and "}}" in value:
         return path
@@ -147,24 +140,6 @@ def _find_unresolved_marker(value: Any, *, path: str = "args") -> str | None:
                 return found
         return None
     return None
-
-
-# def _resolve_route_chain_id(chain_name: str) -> int | None:
-#     return resolve_route_chain_id(chain_name)
-
-
-# def _route_meta_matches_node(
-#     *,
-#     tool: str,
-#     route_meta: Dict[str, Any],
-#     resolved_args: Dict[str, Any],
-# ) -> bool:
-#     return route_meta_matches_node(
-#         tool=tool,
-#         route_meta=route_meta,
-#         resolved_args=resolved_args,
-#     )
-
 
 def _to_decimal(value: Any) -> Decimal | None:
     if value is None or value == "":

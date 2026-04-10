@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import logging
 import re
@@ -28,7 +29,9 @@ from core.planning.execution_plan import (
     StepStatus,
     create_node_reset_state,
 )
-from core.tasks.registry import ConversationTaskRegistry
+from core.tasks.follow_up_classifier import classify_follow_up_reply
+from core.tasks.follow_up_state_registry import ConversationFollowUpStateRegistry
+from core.tasks.registry import ConversationTaskRegistry, resolve_conversation_id
 from core.utils.linking import (
     extract_unlink_target,
     is_link_account_request,
@@ -53,6 +56,7 @@ _RE_CANCEL_ID = re.compile(r"cancel\s+(?:task|order|trigger)?\s*([a-z0-9-]{6,})"
 _RE_CLEAN_CANDIDATE = re.compile(r"[^a-z0-9-]")
 _RE_IDENTITY_HINT = re.compile(r"[^a-z0-9:@._-]+")
 _RE_DEDUP_CONTENT = re.compile(r"\s+")
+_FOLLOW_UP_REGISTRY_LOOKUP_TIMEOUT_SECONDS = 0.3
 
 _IDENTITY_SERVICE_CACHE: dict[str, Any] = {}
 
@@ -150,7 +154,66 @@ def _has_pending_intent(state: AgentState) -> bool:
     return isinstance(pending_intent, dict) and bool(pending_intent)
 
 
-def _should_continue_pending_intent(
+def _pending_intent_expected_slot_from_state(state: AgentState) -> str | None:
+    pending_clarification = state.get("pending_clarification")
+    if isinstance(pending_clarification, dict):
+        slot_name = str(pending_clarification.get("slot_name") or "").strip().lower()
+        if slot_name:
+            return slot_name
+
+    pending_intent = state.get("pending_intent")
+    if isinstance(pending_intent, dict):
+        missing_slots = pending_intent.get("missing_slots")
+        if isinstance(missing_slots, (list, tuple)) and missing_slots:
+            slot_name = str(missing_slots[0] or "").strip().lower()
+            if slot_name:
+                return slot_name
+
+    return None
+
+
+def _coerce_selected_task_number(state: AgentState) -> int | None:
+    raw_value = state.get("selected_task_number")
+    try:
+        return int(raw_value) if raw_value is not None else None
+    except Exception:
+        return None
+
+
+async def _load_pending_intent_expected_slot(state: AgentState) -> str | None:
+    context = state.get("context")
+    context_map = context if isinstance(context, dict) else {}
+    conversation_id = resolve_conversation_id(
+        provider=state.get("provider"),
+        provider_user_id=state.get("user_id"),
+        context=context_map,
+    )
+    if not conversation_id:
+        return _pending_intent_expected_slot_from_state(state)
+
+    thread_id = str(context_map.get("thread_id") or "").strip() or None
+    selected_task_number = _coerce_selected_task_number(state)
+    try:
+        registry = ConversationFollowUpStateRegistry()
+        record = await asyncio.wait_for(
+            registry.get_state(
+                conversation_id=str(conversation_id),
+                mode="pending_intent",
+                thread_id=thread_id,
+                selected_task_number=selected_task_number,
+            ),
+            timeout=_FOLLOW_UP_REGISTRY_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        record = None
+    if isinstance(record, dict):
+        expected_slot = str(record.get("expected_slot") or "").strip().lower()
+        if expected_slot:
+            return expected_slot
+    return _pending_intent_expected_slot_from_state(state)
+
+
+async def _should_continue_pending_intent(
     state: AgentState,
     messages: Sequence[BaseMessage] | None,
     text: str,
@@ -175,11 +238,9 @@ def _should_continue_pending_intent(
     # unless the user clearly starts a new explicit action.
     if _is_explicit_action_request(text):
         return False
-    latest_ai = _latest_ai_text(messages)
-    if "?" in latest_ai:
-        return True
-    pending_clarification = state.get("pending_clarification")
-    return isinstance(pending_clarification, dict) and bool(pending_clarification)
+    expected_slot = await _load_pending_intent_expected_slot(state)
+    classification = classify_follow_up_reply(text, expected_slot=expected_slot)
+    return classification.kind in {"control", "valid_slot_value"}
 
 
 def _latest_ai_text(messages: Sequence[BaseMessage] | None) -> str:
@@ -844,7 +905,7 @@ async def conversational_router_node(state: AgentState) -> Dict[str, Any]:
     guard_enabled = replay_guard_enabled()
     explicit_action = _is_explicit_action_request(last_user_msg)
 
-    if _should_continue_pending_intent(state, messages, last_user_msg):
+    if await _should_continue_pending_intent(state, messages, last_user_msg):
         parse_scope = "recent_turn"
         observe_replay_guard(
             replay_prevented=True,

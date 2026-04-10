@@ -3,5 +3,4 @@
 __pycache__
 .pytest_cache
 tests/
-TODO.md
-docs/REV_GEN_PATHS.md
+REV_GEN.md

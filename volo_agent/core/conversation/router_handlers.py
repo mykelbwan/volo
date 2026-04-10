@@ -839,6 +839,12 @@ async def handle_control_requests(
             "parse_scope": "last_user",
         }
 
+    cancel_id = helpers.parse_cancel_request(last_user_msg)
+    has_specific_cancel_target = bool(cancel_id) and (
+        not is_task_cancel_request(last_user_msg)
+        and str(last_user_msg or "").strip().lower() != "cancel"
+    )
+
     recovery_response = await _handle_error_recovery(
         state,
         last_user_msg,
@@ -851,11 +857,12 @@ async def handle_control_requests(
     if recovery_response:
         return recovery_response
 
-    cancel_response = await _handle_cancellation(
-        state, last_user_msg, requested_task_number, helpers=helpers
-    )
-    if cancel_response:
-        return cancel_response
+    if not has_specific_cancel_target:
+        cancel_response = await _handle_cancellation(
+            state, last_user_msg, requested_task_number, helpers=helpers
+        )
+        if cancel_response:
+            return cancel_response
 
     if has_running and not (
         parsed_account_query is not None
@@ -901,7 +908,6 @@ async def handle_control_requests(
     if waiting_response:
         return waiting_response
 
-    cancel_id = helpers.parse_cancel_request(last_user_msg)
     if cancel_id:
         registry = deps.TriggerRegistry()
         user_info = state.get("user_info") or {}
@@ -983,9 +989,6 @@ async def handle_account_requests(
                 ],
             }
 
-        # Performance/Milestone 3 Optimization:
-        # If we have both a chain and a specific token (fully qualified),
-        # we can fast-path to the balance tool instead of the full planner.
         if account_query.chain:
             evm_addr = helpers.get_sender_address(state)
             user_info = state.get("user_info") or {}
