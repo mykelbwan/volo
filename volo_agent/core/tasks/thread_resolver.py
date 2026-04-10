@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from core.tasks.follow_up_state_registry import ConversationFollowUpStateRegistry
 from core.tasks.registry import ConversationTaskRegistry, resolve_conversation_id
 from core.tasks.router import (
     active_tasks,
     build_task_disambiguation_prompt,
     follow_up_candidate_tasks,
+    is_classifier_positive_selected_task_follow_up,
+    is_selected_task_follow_up_candidate,
     looks_like_explicit_action,
-    looks_like_follow_up_message,
     parse_task_number,
     should_route_to_referenced_task,
     should_route_to_selected_task,
@@ -38,6 +41,32 @@ class TurnThreadResolution:
     blocked_message: str | None = None
 
 
+async def _load_selected_task_expected_slot(
+    *,
+    follow_up_registry_cls: Any,
+    conversation_id: str,
+    thread_id: str | None,
+    selected_task_number: int | None,
+) -> str | None:
+    try:
+        follow_up_registry = follow_up_registry_cls()
+    except Exception:
+        return None
+    try:
+        record = await follow_up_registry.get_state(
+            conversation_id=str(conversation_id),
+            mode="selected_task",
+            thread_id=str(thread_id or "").strip() or None,
+            selected_task_number=selected_task_number,
+        )
+    except Exception:
+        return None
+    if not isinstance(record, dict):
+        return None
+    expected_slot = str(record.get("expected_slot") or "").strip().lower()
+    return expected_slot or None
+
+
 async def _load_candidate_tasks(
     *,
     task_registry_cls: Any,
@@ -54,7 +83,8 @@ async def _load_candidate_tasks(
         if not callable(method):
             continue
         try:
-            tasks = await method(str(conversation_id), limit=limit)
+            result = method(str(conversation_id), limit=limit)
+            tasks = await result if inspect.isawaitable(result) else result
         except Exception:
             continue
         if isinstance(tasks, list):
@@ -100,6 +130,7 @@ async def resolve_selected_thread_id(
     context: Dict[str, Any] | None = None,
     task_registry_cls: Any = ConversationTaskRegistry,
     selection_registry_cls: Any = ConversationTaskSelectionRegistry,
+    follow_up_registry_cls: Any = ConversationFollowUpStateRegistry,
 ) -> tuple[str, int | None]:
     conversation_id = resolve_conversation_id(
         provider=provider,
@@ -128,8 +159,19 @@ async def resolve_selected_thread_id(
     except Exception:
         return str(default_thread_id), None
 
-    if not should_route_to_selected_task(user_message):
-        return str(default_thread_id), task_number
+    if not should_route_to_selected_task(user_message, expected_slot=None):
+        normalized_message = str(user_message or "").strip().lower()
+        if not is_selected_task_follow_up_candidate(normalized_message):
+            return str(default_thread_id), task_number
+        thread_scope = str(ctx.get("thread_id") or default_thread_id or "").strip() or None
+        expected_slot = await _load_selected_task_expected_slot(
+            follow_up_registry_cls=follow_up_registry_cls,
+            conversation_id=str(conversation_id),
+            thread_id=thread_scope,
+            selected_task_number=task_number,
+        )
+        if not should_route_to_selected_task(user_message, expected_slot=expected_slot):
+            return str(default_thread_id), task_number
 
     try:
         task_registry = task_registry_cls()
@@ -157,8 +199,14 @@ async def resolve_selected_thread_id(
     if mode == "inspect_only":
         return str(default_thread_id), task_number
 
-    task_thread_id = str(task.get("thread_id") or "").strip()
+    task_thread_id = (
+        str(task.get("thread_id") or "").strip() if isinstance(task, dict) else ""
+    )
+    if not task_thread_id:
+        return str(default_thread_id), task_number
     return task_thread_id, task_number
+
+
 async def resolve_turn_routing(
     *,
     provider: str,
@@ -168,6 +216,7 @@ async def resolve_turn_routing(
     context: Dict[str, Any] | None = None,
     task_registry_cls: Any = ConversationTaskRegistry,
     selection_registry_cls: Any = ConversationTaskSelectionRegistry,
+    follow_up_registry_cls: Any = ConversationFollowUpStateRegistry,
     thread_id_factory: Any | None = None,
 ) -> TurnThreadResolution:
     selected_thread_id, selected_task_number = await resolve_selected_thread_id(
@@ -178,6 +227,7 @@ async def resolve_turn_routing(
         context=context,
         task_registry_cls=task_registry_cls,
         selection_registry_cls=selection_registry_cls,
+        follow_up_registry_cls=follow_up_registry_cls,
     )
     if str(selected_thread_id) != str(default_thread_id):
         return TurnThreadResolution(
@@ -203,8 +253,19 @@ async def resolve_turn_routing(
                 referenced_task = None
             mode = _selection_routing_mode(referenced_task)
             if mode == "active":
+                task_thread_id = (
+                    str(referenced_task.get("thread_id") or "").strip()
+                    if isinstance(referenced_task, dict)
+                    else ""
+                )
+                if not task_thread_id:
+                    return TurnThreadResolution(
+                        thread_id=str(default_thread_id),
+                        selected_task_number=int(referenced_task_number),
+                        allocated_new_thread=False,
+                    )
                 return TurnThreadResolution(
-                    thread_id=str(referenced_task.get("thread_id")),
+                    thread_id=task_thread_id,
                     selected_task_number=int(referenced_task_number),
                     allocated_new_thread=False,
                 )
@@ -229,7 +290,27 @@ async def resolve_turn_routing(
     )
 
     if not looks_like_explicit_action(user_message):
-        if looks_like_follow_up_message(user_message):
+        normalized_message = str(user_message or "").strip().lower()
+        should_follow_up_route = is_classifier_positive_selected_task_follow_up(
+            normalized_message,
+            expected_slot=None,
+        )
+        if not should_follow_up_route and is_selected_task_follow_up_candidate(
+            normalized_message
+        ):
+            ctx = dict(context or {})
+            thread_scope = str(ctx.get("thread_id") or default_thread_id or "").strip() or None
+            expected_slot = await _load_selected_task_expected_slot(
+                follow_up_registry_cls=follow_up_registry_cls,
+                conversation_id=str(conversation_id),
+                thread_id=thread_scope,
+                selected_task_number=selected_task_number,
+            )
+            should_follow_up_route = is_classifier_positive_selected_task_follow_up(
+                normalized_message,
+                expected_slot=expected_slot,
+            )
+        if should_follow_up_route:
             candidates = [
                 task
                 for task in follow_up_candidate_tasks(tasks)
@@ -237,8 +318,11 @@ async def resolve_turn_routing(
             ]
             if len(candidates) == 1:
                 task = candidates[0]
+                task_number_raw = task.get("task_number")
                 try:
-                    task_number = int(task.get("task_number"))
+                    task_number = (
+                        int(task_number_raw) if task_number_raw is not None else None
+                    )
                 except Exception:
                     task_number = selected_task_number
                 return TurnThreadResolution(
@@ -307,6 +391,8 @@ async def persist_selection_for_thread(
     if not isinstance(task, dict):
         return None
     task_number = task.get("task_number")
+    if task_number is None:
+        return None
     try:
         selected_task_number = int(task_number)
     except Exception:

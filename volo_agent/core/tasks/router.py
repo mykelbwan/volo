@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Iterable, List
 
+from core.tasks.follow_up_classifier import classify_follow_up_reply
 from core.tasks.presentation import format_task_line
 
 
@@ -180,14 +181,44 @@ def looks_like_follow_up_message(text: str | None) -> bool:
     if normalized in control_phrases:
         return True
 
-    words = normalized.split()
-    return len(words) <= 2
+    return False
 
 
-def should_route_to_selected_task(text: str | None) -> bool:
+def is_selected_task_follow_up_candidate(text: str | None) -> bool:
     normalized = str(text or "").strip().lower()
     if not normalized:
-        return True
+        return False
+    return not (
+        looks_like_explicit_action(normalized)
+        or is_global_conversation_request(normalized)
+        or is_task_selection_request(normalized)
+        or is_clear_task_selection_request(normalized)
+        or is_task_detail_request(normalized)
+        or is_generic_task_status_request(normalized)
+        or is_task_control_request(normalized)
+    )
+
+
+def is_classifier_positive_selected_task_follow_up(
+    text: str | None,
+    *,
+    expected_slot: str | None = None,
+) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not is_selected_task_follow_up_candidate(normalized):
+        return False
+    result = classify_follow_up_reply(normalized, expected_slot=expected_slot)
+    return result.kind in {"control", "valid_slot_value"}
+
+
+def should_route_to_selected_task(
+    text: str | None,
+    *,
+    expected_slot: str | None = None,
+) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
     if (
         is_task_selection_request(normalized)
         or is_clear_task_selection_request(normalized)
@@ -197,24 +228,14 @@ def should_route_to_selected_task(text: str | None) -> bool:
     ):
         return True
 
-    explicit_action_markers = (
-        "swap",
-        "bridge",
-        "transfer",
-        "send",
-        "buy",
-        "sell",
-        "convert",
-        "exchange",
-        "unwrap",
-        "check balance",
-        "balance",
-        "portfolio",
-        "holdings",
-    )
-    if any(marker in normalized for marker in explicit_action_markers):
+    if is_global_conversation_request(normalized):
         return False
-    return True
+    if looks_like_explicit_action(normalized):
+        return False
+    return is_classifier_positive_selected_task_follow_up(
+        normalized,
+        expected_slot=expected_slot,
+    )
 
 
 def should_route_to_referenced_task(text: str | None) -> bool:

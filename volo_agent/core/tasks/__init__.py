@@ -3,6 +3,7 @@ from .conversation_runtime import (
     finalize_conversation_turn,
     prepare_conversation_turn,
 )
+from .follow_up_state_registry import ConversationFollowUpStateRegistry
 from .models import ConversationTaskRecord
 from .presentation import (
     format_task_detail,
@@ -46,6 +47,7 @@ from .updater import task_title_from_intent, upsert_task_from_state
 __all__ = [
     "ConversationTaskRecord",
     "ConversationTaskRegistry",
+    "ConversationFollowUpStateRegistry",
     "ConversationTaskSelectionRegistry",
     "PreparedConversationTurn",
     "TurnThreadResolution",

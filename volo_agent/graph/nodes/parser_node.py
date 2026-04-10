@@ -3,6 +3,8 @@ from typing import Any, Dict, cast
 from langchain_core.messages import AIMessage
 
 from core.conversation.responder import respond_conversation
+from core.tasks.follow_up_state_registry import ConversationFollowUpStateRegistry
+from core.tasks.registry import resolve_conversation_id
 from core.tasks.updater import task_title_from_intent, upsert_task_from_state
 from core.utils.user_feedback import intent_missing_info, intent_parsing_failed
 from graph.agent_state import AgentState
@@ -25,6 +27,85 @@ from intent_hub.parser.router import has_positive_action_evidence
 from intent_hub.parser.semantic_parser import _get_token_registry_async, parse_async
 from intent_hub.parser.validation import validate_intent
 from intent_hub.resolver.templates import apply_templates
+
+
+def _follow_up_scope_from_state(
+    state: AgentState,
+) -> tuple[str | None, str | None, int | None]:
+    context = state.get("context")
+    ctx = context if isinstance(context, dict) else {}
+    conversation_id = resolve_conversation_id(
+        provider=state.get("provider"),
+        provider_user_id=state.get("user_id"),
+        context=ctx,
+    )
+    thread_id = str(ctx.get("thread_id") or "").strip() or None
+    selected_task_number: int | None = None
+    raw_selected_task_number = state.get("selected_task_number")
+    try:
+        if raw_selected_task_number is not None:
+            selected_task_number = int(raw_selected_task_number)
+    except Exception:
+        selected_task_number = None
+    return conversation_id, thread_id, selected_task_number
+
+
+def _expected_slot_from_clarification(
+    intent: Intent,
+    clarification: dict[str, Any] | None,
+) -> str | None:
+    if isinstance(clarification, dict):
+        slot_name = str(clarification.get("slot_name") or "").strip().lower()
+        if slot_name:
+            return slot_name
+    missing = list(intent.missing_slots or [])
+    if not missing:
+        return None
+    slot_name = str(missing[0] or "").strip().lower()
+    return slot_name or None
+
+
+async def _set_pending_follow_up_state(
+    state: AgentState,
+    *,
+    intent: Intent,
+    clarification: dict[str, Any] | None,
+) -> None:
+    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(state)
+    if not conversation_id:
+        return
+    expected_slot = _expected_slot_from_clarification(intent, clarification)
+    selected_task_reference: dict[str, Any] | None = None
+    if selected_task_number is not None:
+        selected_task_reference = {"task_number": int(selected_task_number)}
+    try:
+        registry = ConversationFollowUpStateRegistry()
+        await registry.set_state(
+            conversation_id=str(conversation_id),
+            mode="pending_intent",
+            thread_id=thread_id,
+            selected_task_number=selected_task_number,
+            expected_slot=expected_slot,
+            selected_task_reference=selected_task_reference,
+        )
+    except Exception:
+        pass
+
+
+async def _clear_pending_follow_up_state(state: AgentState) -> None:
+    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(state)
+    if not conversation_id:
+        return
+    try:
+        registry = ConversationFollowUpStateRegistry()
+        await registry.clear_state(
+            conversation_id=str(conversation_id),
+            mode="pending_intent",
+            thread_id=thread_id,
+            selected_task_number=selected_task_number,
+        )
+    except Exception:
+        pass
 
 
 def _load_pending_intent(state: AgentState) -> Intent | None:
@@ -298,6 +379,11 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 ),
             )
             if clarification_message:
+                pending_clarification_state = (
+                    next_pending_clarification
+                    if isinstance(next_pending_clarification, dict)
+                    else None
+                )
                 updates = {
                     "intents": [],
                     "parse_scope": None,
@@ -312,6 +398,11 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 }
                 if artifacts != (state.get("artifacts") or {}):
                     updates["artifacts"] = artifacts
+                await _set_pending_follow_up_state(
+                    state,
+                    intent=pending_intent,
+                    clarification=pending_clarification_state,
+                )
                 await upsert_task_from_state(
                     cast(dict, state),
                     title=task_title_from_intent(pending_intent),
@@ -380,7 +471,17 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 attempt_count=0,
                 last_resolution_error=None,
             )
+            pending_clarification_state = updates["pending_clarification"]
             updates["messages"] = [AIMessage(content=intent.clarification_prompt)]
+            await _set_pending_follow_up_state(
+                state,
+                intent=intent,
+                clarification=(
+                    pending_clarification_state
+                    if isinstance(pending_clarification_state, dict)
+                    else None
+                ),
+            )
             await upsert_task_from_state(
                 cast(dict, state),
                 title=task_title_from_intent(intent),
@@ -402,8 +503,18 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 attempt_count=0,
                 last_resolution_error=None,
             )
+            pending_clarification_state = updates["pending_clarification"]
             feedback = intent_missing_info(intent.missing_slots)
             updates["messages"] = [AIMessage(content=feedback.render())]
+            await _set_pending_follow_up_state(
+                state,
+                intent=intent,
+                clarification=(
+                    pending_clarification_state
+                    if isinstance(pending_clarification_state, dict)
+                    else None
+                ),
+            )
             await upsert_task_from_state(
                 cast(dict, state),
                 title=task_title_from_intent(intent),
@@ -412,5 +523,11 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 tool=str(intent.intent_type),
             )
             break
+
+    if (
+        updates.get("pending_intent") is None
+        and (pending_intent is not None or isinstance(pending_clarification, dict))
+    ):
+        await _clear_pending_follow_up_state(state)
 
     return updates
