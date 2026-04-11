@@ -185,9 +185,7 @@ def _extract_gas_cost_source(
         if raw_amount is not None:
             try:
                 # Gas cost amounts are in native-token units.
-                total += Decimal(str(int(raw_amount))) / Decimal(
-                    10**native_decimals
-                )
+                total += Decimal(str(int(raw_amount))) / Decimal(10**native_decimals)
                 found_any = True
             except Exception:
                 pass
@@ -233,9 +231,10 @@ def _fetch_quote(
     raise_for_status(resp, "lifi-quote")
     return resp.json()
 
+
 class LiFiAggregator(BridgeAggregator):
     name: str = "lifi"
-    TIMEOUT_SECONDS: float = 8.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,
@@ -299,7 +298,8 @@ class LiFiAggregator(BridgeAggregator):
             self._log_failure("from_amount_wei is zero or negative after conversion")
             return None
 
-        timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
+        # timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
+        timeout = self.TIMEOUT_SECONDS
 
         # Default slippage: 0.5 %.  We don't expose per-aggregator slippage in
         # the router interface, so we use a safe default.  This can be made
@@ -328,7 +328,6 @@ class LiFiAggregator(BridgeAggregator):
             self._log_failure("unexpected error", exc)
             return None
 
-        # ── Parse estimate ────────────────────────────────────────────────
         estimate: Dict[str, Any] = data.get("estimate") or {}
         if not estimate:
             self._log_failure("response missing estimate object")
@@ -346,7 +345,6 @@ class LiFiAggregator(BridgeAggregator):
             )
             return None
 
-        # ── Compute fees ──────────────────────────────────────────────────
         fee_costs: List[Dict[str, Any]] = estimate.get("feeCosts") or []
         total_fee = _sum_fee_costs(fee_costs, src_decimals)
 
@@ -359,7 +357,6 @@ class LiFiAggregator(BridgeAggregator):
         # Clamp fee_pct to [0, 100] to handle any edge-case data anomalies.
         total_fee_pct = max(Decimal("0"), min(Decimal("100"), total_fee_pct))
 
-        # ── Fill time ─────────────────────────────────────────────────────
         fill_time_seconds = 0
         raw_duration = estimate.get("executionDuration")
         if raw_duration is not None:
@@ -368,11 +365,9 @@ class LiFiAggregator(BridgeAggregator):
             except (ValueError, TypeError):
                 pass
 
-        # ── Gas cost on source chain ──────────────────────────────────────
         gas_costs: List[Dict[str, Any]] = estimate.get("gasCosts") or []
         gas_cost_source = _extract_gas_cost_source(gas_costs, source_chain_id)
 
-        # ── Transaction request (execution calldata) ──────────────────────
         tx_request: Optional[Dict[str, Any]] = data.get("transactionRequest") or None
         calldata: Optional[str] = None
         to_contract: Optional[str] = None
@@ -381,7 +376,6 @@ class LiFiAggregator(BridgeAggregator):
             calldata = tx_request.get("data") or None
             to_contract = tx_request.get("to") or None
 
-        # ── Extract which bridge protocol Li.Fi chose ─────────────────────
         # Li.Fi routes through one or more steps.  For a direct bridge the
         # first step's ``toolDetails.name`` identifies the underlying bridge.
         # We append this to the aggregator name for PerformanceLedger keying.

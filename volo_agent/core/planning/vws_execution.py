@@ -91,11 +91,11 @@ def _topological_order(plan: ExecutionPlan) -> List[str]:
     return ordered
 
 
-def _normalize_token_ref(token_ref: str | None, node_args: Dict[str, Any]) -> str:
+def _normalize_token_ref(token_ref: str | None, node_args: Dict[str, Any], tool: str | None = None) -> str:
     raw = str(token_ref or "").strip().lower()
     if not raw:
         return raw
-    fee_chain = resolve_fee_chain(node_args)
+    fee_chain = resolve_fee_chain(node_args, tool=tool)
     if fee_chain is None:
         return raw
     if fee_chain.family == "evm":
@@ -112,8 +112,8 @@ def _normalize_token_ref(token_ref: str | None, node_args: Dict[str, Any]) -> st
     return raw
 
 
-def _native_token_ref(node_args: Dict[str, Any]) -> str:
-    fee_chain = resolve_fee_chain(node_args)
+def _native_token_ref(node_args: Dict[str, Any], tool: str | None = None) -> str:
+    fee_chain = resolve_fee_chain(node_args, tool=tool)
     if fee_chain is None:
         return NATIVE_ADDRESS
     return str(fee_chain.native_token_ref).strip().lower()
@@ -131,8 +131,8 @@ def _node_native_chain_name(node_tool: str, node_args: Dict[str, Any]) -> str:
     return _node_chain_name(node_tool, node_args)
 
 
-def _node_family(node_args: Dict[str, Any]) -> str:
-    fee_chain = resolve_fee_chain(node_args)
+def _node_family(node_args: Dict[str, Any], tool: str | None = None) -> str:
+    fee_chain = resolve_fee_chain(node_args, tool=tool)
     return fee_chain.family if fee_chain is not None else "evm"
 
 
@@ -156,7 +156,7 @@ def _estimate_native_gas_cost(
     family: str | None = None,
     gas_profile: str | None = None,
 ) -> Decimal:
-    family = str(family or _node_family(node_args)).strip().lower()
+    family = str(family or _node_family(node_args, tool=node_tool)).strip().lower()
     gas_profile = str(gas_profile or node_tool).strip().lower()
     if family == "solana":
         if gas_profile == "solana_native_transfer":

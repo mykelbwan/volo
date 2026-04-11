@@ -62,7 +62,6 @@ def _resolve_mayan_chain(chain_id: int) -> Optional[str]:
 
 
 def _get_display_name(chain_id: int, fallback: str) -> str:
-    """Return a human-readable name for the chain."""
     if _is_solana_chain(chain_id):
         sol_cfg = SOLANA_CHAINS.get("solana")
         return sol_cfg.name if sol_cfg else "Solana"
@@ -132,7 +131,7 @@ def _summarize_mayan_error(
 
 class MayanAggregator(BridgeAggregator):
     name: str = "mayan"
-    TIMEOUT_SECONDS: float = 8.0
+    TIMEOUT_SECONDS: float = 60.0
 
     def __init__(self) -> None:
         self.last_error: Optional[str] = None
@@ -187,6 +186,17 @@ class MayanAggregator(BridgeAggregator):
         from_token = _ZERO if source_token.is_native else source_token.address
         to_token = _ZERO if dest_token.is_native else dest_token.address
 
+        # Convert human-readable amount to atomic units (integers)
+        # Mayan's 'amountIn64' expects the raw integer value (e.g. wei for ETH).
+        # We must use the source token's decimals to scale correctly.
+        src_decimals = int(source_token.decimals)
+        amount_atomic = int(amount * Decimal(10**src_decimals))
+
+        if amount_atomic <= 0:
+            self.last_error = f"amount too small after conversion for {symbol}."
+            self._log_failure(self.last_error)
+            return None
+
         slippage_bps = int(_default_slippage())
 
         try:
@@ -206,7 +216,7 @@ class MayanAggregator(BridgeAggregator):
                     "monoChain": "true",
                     "solanaProgram": _MAYAN_PROGRAM_ID,
                     "forwarderAddress": _MAYAN_FORWARDER_CONTRACT,
-                    "amountIn64": str(amount),
+                    "amountIn64": str(amount_atomic),
                     "fromToken": from_token,
                     "toToken": to_token,
                     "fromChain": mayan_from,

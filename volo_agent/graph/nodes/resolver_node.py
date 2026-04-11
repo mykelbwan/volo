@@ -470,6 +470,20 @@ async def intent_resolver_node(state: AgentState) -> Dict[str, Any]:
         "goal_parameters": goal_params,
         "plan_history": [execution_plan],
         "execution_state": execution_state,
+        # Reset plan-scoped preflight artifacts so a fresh intent cannot
+        # accidentally reuse stale fees/simulations from a prior request.
+        "fee_quotes": [],
+        "balance_snapshot": {},
+        "resource_snapshots": {},
+        "native_requirements": {},
+        "reservation_requirements": {},
+        "projected_deltas": None,
+        "preflight_estimates": {},
+        "vws_simulation": None,
+        "vws_failure": None,
+        "route_decisions": {},
+        "candidate_plans": None,
+        "plan_optimizer_debug": None,
         "reasoning_logs": logs,
         "execution_id": str(uuid.uuid4()),
     }

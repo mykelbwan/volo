@@ -702,7 +702,7 @@ def coerce_fallback_policy(payload: Any) -> FallbackPolicy:
     if isinstance(nested, Mapping):
         payload = nested
 
-    allow = bool(payload.get("allow_fallback", True))
+    allow = bool(payload.get("allow_fallback", False))
     raw_reason = payload.get("reason")
     if raw_reason is None:
         raw_reason = payload.get("fallback_reason")

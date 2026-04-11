@@ -146,7 +146,7 @@ class FeeEngine:
         activity = self._activity_key(node.tool)
 
         # ── Resolve chain ────────────────────────────────────────────────
-        chain = resolve_fee_chain(args)
+        chain = resolve_fee_chain(args, tool=node.tool)
         if chain is None:
             return None
         treasury = get_fee_treasury(chain.family)
@@ -163,9 +163,11 @@ class FeeEngine:
         final_bps: int = max(base_bps - discount_bps, 0)
 
         # ── Determine whether the input token is native ──────────────────
-        # swap  → token_in_address
+        # swap   → token_in_address
+        # bridge → source_address
         token_address: Optional[str] = (
             args.get("token_in_address")
+            or args.get("source_address")
             or args.get("token_address")
             or args.get("token_in_mint")
             or args.get("token_mint")

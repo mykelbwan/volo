@@ -12,6 +12,7 @@ _LOGGER = logging.getLogger("volo.routing.solana")
 
 class SolanaSwapAggregator(ABC):
     name: str = "unknown"
+    TIMEOUT_SECONDS: float = 60.0
 
     @abstractmethod
     async def get_quote(
