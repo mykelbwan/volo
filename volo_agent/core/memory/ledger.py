@@ -285,6 +285,7 @@ class PerformanceLedger:
         self._fallback: Optional[_FileLedger] = None
         self._async_indexes_ready = False
         self._async_index_lock: asyncio.Lock | None = None
+        self._fallback = _FileLedger()
         try:
             from core.database.mongodb import MongoDB
 

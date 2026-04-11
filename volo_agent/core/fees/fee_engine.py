@@ -146,7 +146,7 @@ class FeeEngine:
         activity = self._activity_key(node.tool)
 
         # ── Resolve chain ────────────────────────────────────────────────
-        chain = resolve_fee_chain(args)
+        chain = resolve_fee_chain(args, tool=node.tool)
         if chain is None:
             return None
         treasury = get_fee_treasury(chain.family)

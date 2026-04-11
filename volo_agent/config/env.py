@@ -21,13 +21,8 @@ FEE_TREASURY_ADDRESS = os.getenv("FEE_TREASURY_ADDRESS", "")
 if FEE_TREASURY_ADDRESS is None:
     raise ValueError("FEE_TREASURY_ADDRESS environment variable is not set")
 
-SOMNIA_CHAIN = os.getenv("SOMNIA_CHAIN", "somnia-testnet")
-if SOMNIA_CHAIN is None:
-    raise ValueError("SOMNIA_CHAIN environment variable is not set")
-
-SOMNIA_RPC_URL = os.getenv("SOMNIA_TESTNET_RPC_URL", "https://dream-rpc.somnia.network")
-if SOMNIA_RPC_URL is None:
-    raise ValueError("SOMNIA_RPC_URL environment variable is not set")
+SOMNIA_CHAIN = os.getenv("SOMNIA_CHAIN")
+SOMNIA_RPC_URL = os.getenv("SOMNIA_TESTNET_RPC_URL")
 
 CDP_API_KEY_ID = os.getenv("CDP_API_KEY_ID")
 if CDP_API_KEY_ID is None:
