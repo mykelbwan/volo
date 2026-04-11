@@ -37,7 +37,7 @@ from wallet_service.evm.gas_price import gas_price_cache
 
 _LOGGER = logging.getLogger("volo.routing.router")
 # Timeout for each internal simulator call (blocking, runs in thread pool).
-_INTERNAL_SIMULATOR_TIMEOUT: float = 5.0
+_INTERNAL_SIMULATOR_TIMEOUT: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -321,11 +321,11 @@ async def _get_gas_cost_usd_fallback(
     native_amount: Optional[Decimal] = None,
 ) -> Optional[Decimal]:
     try:
-        # 1. Resolve chain config to get native token symbol
+        # Resolve chain config to get native token symbol
         chain_cfg = get_chain_by_id(chain_id)
         native_symbol = chain_cfg.native_symbol
 
-        # 2. Fetch native token price in USD
+        # Fetch native token price in USD
         native_price_usd = await price_cache.get(native_symbol)
         if native_price_usd is None:
             if native_symbol == "ETH":
@@ -333,11 +333,11 @@ async def _get_gas_cost_usd_fallback(
             else:
                 return None
 
-        # 3. If native_amount is provided, just multiply by price
+        # If native_amount is provided, just multiply by price
         if native_amount is not None:
             return native_amount * Decimal(str(native_price_usd))
 
-        # 4. If gas_estimate is provided, fetch gas price and calculate
+        # If gas_estimate is provided, fetch gas price and calculate
         if gas_estimate is not None and gas_estimate > 0:
             gas_price_wei = await gas_price_cache.get_wei(chain_id)
             if not gas_price_wei:
@@ -369,8 +369,6 @@ class RoutePlanner:
         # Bridge aggregators
         self.bridge_aggregators: List[BridgeAggregator] = bridge_aggregators or [
             LiFiAggregator(),
-            # Mayan activates only when one chain is Solana — returns None
-            # immediately for pure EVM↔EVM routes so it adds zero overhead.
             MayanAggregator(),
         ]
         # Solana DEX aggregators — stateless singletons, safe to share.
@@ -416,7 +414,6 @@ class RoutePlanner:
 
         slippage_pct = float(node_args.get("slippage", 0.5) or 0.5)
 
-        # ── Resolve chain config ──────────────────────────────────────────
         try:
             chain_cfg = get_chain_by_name(chain_name)
         except KeyError as exc:
@@ -426,10 +423,9 @@ class RoutePlanner:
         chain_id = chain_cfg.chain_id
         chain_name_canonical = chain_cfg.name
 
-        # ── Build coroutines for external aggregators only ────────────────
         # Internal V3/V2 execution is intentionally deferred to swap_tool
         # fallback, so route discovery remains non-blocking and lightweight.
-        tasks: List[Tuple[str, Any]] = []  # (source_name, coroutine_or_awaitable)
+        tasks: List[Tuple[str, Any]] = [] 
 
         # External aggregators
         for agg in self.swap_aggregators:
@@ -458,12 +454,12 @@ class RoutePlanner:
             )
             return None
 
-        # ── Execute all sources in parallel ───────────────────────────────
+        # Execute all sources in parallel 
         source_names = [name for name, _ in tasks]
         coros = [coro for _, coro in tasks]
         raw_results = await asyncio.gather(*coros)
 
-        # ── Collect valid SwapRouteQuote objects ──────────────────────────
+        # Collect valid SwapRouteQuote objects 
         quotes: List[SwapRouteQuote] = []
         source_failures: Dict[str, str] = {}
         for name, outcome in zip(source_names, raw_results):
@@ -475,7 +471,7 @@ class RoutePlanner:
                 failure = None
 
             if isinstance(result, SwapRouteQuote):
-                # ── Approach B: Normalize gas cost if missing ─────────────
+                #  Normalize gas cost if missing 
                 if result.gas_cost_usd is None and result.gas_estimate > 0:
                     result.gas_cost_usd = await _get_gas_cost_usd_fallback(
                         result.chain_id, result.gas_estimate
@@ -515,7 +511,7 @@ class RoutePlanner:
                 f"Source failures: {failure_summary}."
             )
 
-        # ── Score and select best quote ───────────────────────────────────
+        # Score and select best quote 
         best_result = pick_best_swap(quotes, ledger, chain_name_canonical)
         if best_result is None:
             return None
@@ -555,7 +551,7 @@ class RoutePlanner:
         sender: str,
         ledger: PerformanceLedger,
     ) -> Optional[RouteDecision]:
-        # ── Extract and validate args ─────────────────────────────────────
+        # Extract and validate args 
         token_in_mint = str(node_args.get("token_in_mint") or "").strip()
         token_out_mint = str(node_args.get("token_out_mint") or "").strip()
         network = str(node_args.get("network") or "solana").strip().lower()
@@ -583,14 +579,14 @@ class RoutePlanner:
 
         slippage_pct = float(node_args.get("slippage", 0.5) or 0.5)
 
-        # ── Resolve Solana chain config ───────────────────────────────────
+        # Resolve Solana chain config 
         try:
             chain = get_solana_chain(network)
         except KeyError as exc:
             _LOGGER.debug("[router:solana] unknown network %r: %s", network, exc)
             return None
 
-        # ── Fetch token decimals (parallel, non-blocking) ─────────────────
+        # Fetch token decimals (parallel, non-blocking) 
         # These are needed to convert the human-readable amount_in to the
         # raw lamport integer that Jupiter and Raydium expect.
         try:
@@ -608,7 +604,7 @@ class RoutePlanner:
             )
             return None
 
-        # ── Build coroutines for all Solana aggregators ───────────────────
+        # Build coroutines for all Solana aggregators 
         tasks: List[Tuple[str, Any]] = []
         for agg in self.solana_aggregators:
             coro = agg.get_quote(
@@ -632,12 +628,12 @@ class RoutePlanner:
         if not tasks:
             return None
 
-        # ── Execute all aggregators in parallel ───────────────────────────
+        # Execute all aggregators in parallel 
         source_names = [name for name, _ in tasks]
         coros = [coro for _, coro in tasks]
         raw_results = await asyncio.gather(*coros)
 
-        # ── Collect valid SolanaSwapRouteQuote objects ────────────────────
+        #  Collect valid SolanaSwapRouteQuote objects 
         quotes: List[SolanaSwapRouteQuote] = []
         for name, result in zip(source_names, raw_results):
             if isinstance(result, SolanaSwapRouteQuote):
@@ -661,7 +657,7 @@ class RoutePlanner:
             )
             return None
 
-        # ── Score and select best quote ───────────────────────────────────
+        # Score and select best quote 
         best_result = pick_best_solana_swap(quotes, ledger)
         if best_result is None:
             return None
@@ -699,8 +695,10 @@ class RoutePlanner:
         node_args: Dict[str, Any],
         sender: str,
         ledger: PerformanceLedger,
+        *,
+        solana_sender: Optional[str] = None,
     ) -> Optional[RouteDecision]:
-        # ── Extract and validate args ─────────────────────────────────────
+        # Extract and validate args
         token_symbol = str(node_args.get("token_symbol", "")).strip().upper()
         source_chain_name = str(node_args.get("source_chain", "")).strip()
         dest_chain_name = str(node_args.get("target_chain", "")).strip()
@@ -730,16 +728,32 @@ class RoutePlanner:
             return None
 
         # Resolve actual sender / recipient.
-        effective_sender = node_args.get("sender", sender) or sender
-        if "{{" in effective_sender:
-            effective_sender = sender
-        effective_recipient = (
-            node_args.get("recipient", effective_sender) or effective_sender
-        )
-        if "{{" in effective_recipient:
-            effective_recipient = effective_sender
+        source_is_solana = is_solana_network(source_chain_name)
+        dest_is_solana = is_solana_network(dest_chain_name)
 
-        # ── Resolve chain configs ─────────────────────────────────────────
+        # Default fallback for sender based on source chain.
+        sender_fallback = solana_sender if source_is_solana else sender
+        effective_sender = node_args.get("sender", sender_fallback) or sender_fallback
+        if effective_sender and "{{" in str(effective_sender):
+            effective_sender = sender_fallback
+
+        # Default fallback for recipient based on destination chain.
+        recipient_fallback = solana_sender if dest_is_solana else sender
+        effective_recipient = (
+            node_args.get("recipient", recipient_fallback) or recipient_fallback
+        )
+        if effective_recipient and "{{" in str(effective_recipient):
+            effective_recipient = recipient_fallback
+
+        # If we still have no addresses for an EVM/Solana route, we can't get a real quote.
+        if not effective_sender or not effective_recipient:
+            _LOGGER.debug(
+                "[router:bridge] missing sender/recipient for %s→%s",
+                source_chain_name,
+                dest_chain_name,
+            )
+            return None
+        #  Resolve chain configs 
         # Solana chain IDs now live in config/solana_chains.py, so bridge
         # routing can treat them like any other registered chain ID.
         source_chain_id: int
@@ -774,7 +788,7 @@ class RoutePlanner:
                 _LOGGER.debug("[router:bridge] unknown dest chain: %s", dest_chain_name)
                 return None
 
-        # ── Build coroutines for all sources ──────────────────────────────
+        # Build coroutines for all sources 
         tasks: List[Tuple[str, Any]] = []
 
         # External aggregators (Li.Fi, Mayan for Solana routes)
@@ -846,16 +860,16 @@ class RoutePlanner:
         if not tasks:
             return None
 
-        # ── Execute all sources in parallel ───────────────────────────────
+        # Execute all sources in parallel 
         source_names = [name for name, _ in tasks]
         coros = [coro for _, coro in tasks]
         raw_results = await asyncio.gather(*coros)
 
-        # ── Collect valid BridgeRouteQuote objects ────────────────────────
+        # Collect valid BridgeRouteQuote objects 
         quotes: List[BridgeRouteQuote] = []
         for name, result in zip(source_names, raw_results):
             if isinstance(result, BridgeRouteQuote):
-                # ── Approach B: Normalize gas cost if missing ─────────────
+                # Normalize gas cost if missing 
                 if result.gas_cost_usd is None:
                     # Case 1: Fetch directly from aggregator tool_data
                     raw_usd = (
@@ -867,7 +881,7 @@ class RoutePlanner:
                         except Exception:
                             pass
 
-                    # Case 2: Estimate from gas_cost_source (Native units)
+                    # Estimate from gas_cost_source (Native units)
                     if result.gas_cost_usd is None and result.gas_cost_source:
                         result.gas_cost_usd = await _get_gas_cost_usd_fallback(
                             result.source_chain_id, native_amount=result.gas_cost_source
@@ -894,7 +908,7 @@ class RoutePlanner:
             )
             return None
 
-        # ── Score and select best quote ───────────────────────────────────
+        # Score and select best quote 
         best_result = pick_best_bridge(quotes, ledger)
         if best_result is None:
             return None

@@ -425,7 +425,8 @@ class RoutingApplicationService:
         *,
         plan: ExecutionPlan,
         execution_state: Any,
-        sender: str,
+        evm_sender: str,
+        solana_sender: str,
         ledger: Any,
     ) -> _RoutedPlanBundle:
         node_start = time.time()
@@ -456,7 +457,7 @@ class RoutingApplicationService:
                 routing_coros.append(
                     self._route_planner.get_best_swap_route(
                         node_args=node.args,
-                        sender=sender,
+                        sender=evm_sender,
                         ledger=ledger,
                     )
                 )
@@ -464,7 +465,7 @@ class RoutingApplicationService:
                 routing_coros.append(
                     self._route_planner.get_best_solana_swap_route(
                         node_args=node.args,
-                        sender=sender,
+                        sender=solana_sender,
                         ledger=ledger,
                     )
                 )
@@ -472,8 +473,9 @@ class RoutingApplicationService:
                 routing_coros.append(
                     self._route_planner.get_best_bridge_route(
                         node_args=node.args,
-                        sender=sender,
+                        sender=evm_sender,
                         ledger=ledger,
+                        solana_sender=solana_sender,
                     )
                 )
 
@@ -671,14 +673,18 @@ class RoutingApplicationService:
 
         execution_state = state.get("execution_state")
         user_info = state.get("user_info") or {}
-        sender = ""
+        evm_address = ""
+        solana_address = ""
         if isinstance(user_info, dict):
-            sender = (
+            evm_address = (
                 user_info.get("wallet_address")
                 or user_info.get("address")
                 or user_info.get("sender")
+                or user_info.get("sender_address")
+                or user_info.get("evm_address")
                 or ""
             )
+            solana_address = user_info.get("solana_address") or ""
 
         ledger = get_ledger()
         topology_candidates, skip_reason = await generate_candidates(original_plan)
@@ -693,7 +699,8 @@ class RoutingApplicationService:
             routed = await self._route_single_plan(
                 plan=topology_plan,
                 execution_state=execution_state,
-                sender=sender,
+                evm_sender=evm_address,
+                solana_sender=solana_address,
                 ledger=ledger,
             )
             variants = self._candidate_variants(base_bundle=routed, ledger=ledger)

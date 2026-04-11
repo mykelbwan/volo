@@ -180,10 +180,21 @@ def _parse_pairs(
         if pair_chain != target_slug:
             continue
 
-        # Exact base-token symbol match
         base_token = pair.get("baseToken") or {}
+        quote_token = pair.get("quoteToken") or {}
+
         base_symbol = (base_token.get("symbol") or "").upper()
-        if base_symbol != symbol_upper:
+        quote_symbol = (quote_token.get("symbol") or "").upper()
+
+        # Check if the target symbol matches either base or quote token
+        if base_symbol == symbol_upper:
+            # Target is the base token
+            pass
+        elif quote_symbol == symbol_upper:
+            # Target is the quote token - swap base and quote for the aggregate function
+            # so it can always look at 'baseToken' to find the target address/name.
+            pair["baseToken"], pair["quoteToken"] = quote_token, base_token
+        else:
             continue
 
         # Minimum liquidity gate
@@ -275,6 +286,7 @@ def get_candidates(
     chain_name: str,
     max_candidates: int = _DEFAULT_MAX_CANDIDATES,
     timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+    _fallback_index: int = 0,
 ) -> list[DexscreenerCandidate]:
     if _is_testnet_chain(chain_id, chain_name):
         logger.info(
@@ -294,13 +306,16 @@ def get_candidates(
         )
         return []
 
-    symbol_upper = symbol.upper()
+    # If we are in a fallback retry, symbol might be "USDC ethereum"
+    # We always use the first word as the canonical symbol for filtering.
+    clean_symbol = symbol.split()[0].upper()
+
     url = f"{_BASE_URL}{_SEARCH_ENDPOINT}"
-    params = {"q": symbol_upper}
+    params = {"q": symbol.upper()}
 
     logger.info(
-        "Dexscreener: searching for %s on chain_id=%d (%s).",
-        symbol_upper,
+        "Dexscreener: searching for '%s' on chain_id=%d (%s).",
+        symbol.upper(),
         chain_id,
         chain_name,
     )
@@ -312,22 +327,58 @@ def get_candidates(
         raise
     except Exception as exc:
         raise DexscreenerError(
-            f"Unexpected error querying Dexscreener for {symbol_upper}: {exc}"
+            f"Unexpected error querying Dexscreener for {symbol.upper()}: {exc}"
         ) from exc
 
-    pairs = _parse_pairs(raw, symbol=symbol_upper, target_chain_id=chain_id)
+    pairs = _parse_pairs(raw, symbol=clean_symbol, target_chain_id=chain_id)
+
+    # If no results found with current query, try fallback terms to force
+    # Dexscreener to surface relevant pairs on the target chain.
+    if not pairs:
+        fallbacks = [
+            f"{clean_symbol} {target_slug}",
+            f"{clean_symbol} {chain_name}",
+            f"{clean_symbol} mainnet",
+        ]
+
+        # Filter out duplicates and the original symbol itself to avoid infinite loops.
+        # We filter against clean_symbol to keep this list stable across recursive retries.
+        unique_fallbacks = []
+        for f in fallbacks:
+            if f.upper() != clean_symbol.upper() and f not in unique_fallbacks:
+                unique_fallbacks.append(f)
+
+        if _fallback_index < len(unique_fallbacks):
+            next_term = unique_fallbacks[_fallback_index]
+            logger.info(
+                "Dexscreener: no valid pairs for %s on chain_id=%d. "
+                "Retrying with '%s' (fallback %d/%d)...",
+                clean_symbol,
+                chain_id,
+                next_term,
+                _fallback_index + 1,
+                len(unique_fallbacks),
+            )
+            return get_candidates(
+                symbol=next_term,
+                chain_id=chain_id,
+                chain_name=chain_name,
+                max_candidates=max_candidates,
+                timeout=timeout,
+                _fallback_index=_fallback_index + 1,
+            )
 
     if not pairs:
         logger.info(
-            "Dexscreener: no valid pairs found for %s on chain_id=%d.",
-            symbol_upper,
+            "Dexscreener: no valid pairs found for %s on chain_id=%d after all attempts.",
+            clean_symbol,
             chain_id,
         )
         return []
 
     candidates = _aggregate_candidates(
         pairs=pairs,
-        symbol=symbol_upper,
+        symbol=clean_symbol,
         chain_id=chain_id,
         chain_name=chain_name,
         max_candidates=max_candidates,
@@ -337,7 +388,7 @@ def get_candidates(
         "Dexscreener: found %d unique candidate(s) for %s on chain_id=%d. "
         "Top liquidity: $%.0f.",
         len(candidates),
-        symbol_upper,
+        clean_symbol,
         chain_id,
         candidates[0].liquidity_usd if candidates else 0,
     )
@@ -346,12 +397,6 @@ def get_candidates(
 
 
 def _safe_float(value: Any) -> Optional[float]:
-    """
-    Convert *value* to float, returning ``None`` on any error.
-
-    Dexscreener returns some numeric fields as strings e.g. priceUsd,
-    while others are native JSON numbers.  This helper handles both.
-    """
     if value is None:
         return None
     try:

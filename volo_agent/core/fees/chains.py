@@ -21,9 +21,12 @@ class FeeChain:
 
 
 def resolve_fee_chain(node_args: dict[str, Any]) -> FeeChain | None:
+    # For bridges, source_chain is the canonical chain where the transaction starts
+    # and where fees are typically collected. We prioritize it over the generic 'chain'
+    # which might be injected as a default for the entire plan.
     raw_chain = (
-        node_args.get("chain")
-        or node_args.get("source_chain")
+        node_args.get("source_chain")
+        or node_args.get("chain")
         or node_args.get("network")
     )
     if not raw_chain:

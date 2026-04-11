@@ -11,13 +11,8 @@ _LOGGER = logging.getLogger("volo.routing.bridge")
 
 
 class BridgeAggregator(ABC):
-    #: Machine-readable identifier.  Must be unique across all adapters and
-    #: match the key used in ``PerformanceLedger`` (e.g. ``"lifi"``).
     name: str = "unknown"
-
-    #: Per-request timeout in seconds.  The router enforces this via
-    #: ``asyncio.wait_for`` — adapters do not need their own timer.
-    TIMEOUT_SECONDS: float = 7.0
+    TIMEOUT_SECONDS: float = 60.0
 
     @abstractmethod
     async def get_quote(
