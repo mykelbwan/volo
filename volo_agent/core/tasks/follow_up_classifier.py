@@ -11,7 +11,6 @@ from core.utils.balance_chains import (
     canonicalize_balance_chain,
 )
 
-_AMOUNT_RE = re.compile(r"(?<![a-z0-9])(\d+(?:\.\d+)?)(?![a-z])", re.IGNORECASE)
 _EVM_ADDRESS_RE = re.compile(r"\b0x[a-fA-F0-9]{40}\b")
 _SOLANA_ADDRESS_RE = re.compile(r"\b[1-9A-HJ-NP-Za-km-z]{32,44}\b")
 _TOKEN_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9._-]{0,31}")
@@ -131,14 +130,53 @@ def parse_amount_slot_value(text: str | None) -> float | str | None:
     normalized = _normalize(text)
     if normalized in {"all", "max"}:
         return normalized
-    match = _AMOUNT_RE.search(str(text or ""))
-    if not match:
+    amount_text = _extract_amount_token(str(text or ""))
+    if amount_text is None:
         return None
     try:
-        value = float(match.group(1))
+        value = float(amount_text)
     except (TypeError, ValueError):
         return None
     return value if value > 0 else None
+
+
+def _extract_amount_token(text: str) -> str | None:
+    raw = str(text or "")
+    size = len(raw)
+    idx = 0
+    while idx < size:
+        if not raw[idx].isdigit():
+            idx += 1
+            continue
+
+        start = idx
+        if start > 0 and _is_ascii_alnum(raw[start - 1]):
+            idx += 1
+            continue
+
+        end = start
+        while end < size and raw[end].isdigit():
+            end += 1
+        if end < size and raw[end] == "." and (end + 1) < size and raw[end + 1].isdigit():
+            end += 1
+            while end < size and raw[end].isdigit():
+                end += 1
+
+        if end < size and _is_ascii_letter(raw[end]):
+            idx = end + 1
+            continue
+        return raw[start:end]
+
+    return None
+
+
+def _is_ascii_alnum(char: str) -> bool:
+    return _is_ascii_letter(char) or char.isdigit()
+
+
+def _is_ascii_letter(char: str) -> bool:
+    lowered = char.lower()
+    return "a" <= lowered <= "z"
 
 
 def parse_token_slot_value(text: str | None) -> dict[str, str] | None:
