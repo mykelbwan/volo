@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from config.chains import get_chain_by_id, get_chain_by_name
+from config.solana_chains import get_solana_chain, get_solana_chain_by_id
 from core.token_security.cache import TokenSecurityCache
 from core.token_security.dexscreener import (
     DexscreenerError,
@@ -33,6 +34,26 @@ from core.token_security.token_db import (
 logger = logging.getLogger(__name__)
 
 _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+
+def _resolve_chain_by_name(chain_name: str) -> Any:
+    try:
+        return get_chain_by_name(chain_name)
+    except KeyError:
+        try:
+            return get_solana_chain(chain_name)
+        except KeyError as exc:
+            raise ValueError(
+                f"Chain '{chain_name}' is not registered. "
+                "Check config/chains.py or config/solana_chains.py for valid chain names."
+            ) from exc
+
+
+def _resolve_chain_by_id(chain_id: int) -> Any:
+    try:
+        return get_chain_by_id(chain_id)
+    except KeyError:
+        return get_solana_chain_by_id(chain_id)
 
 
 def _registry_entry_to_resolved(
@@ -130,13 +151,7 @@ class TokenSecurityManager:
         symbol_upper = symbol.strip().upper()
         chain_name_lower = chain_name.strip().lower()
 
-        try:
-            chain = get_chain_by_name(chain_name_lower)
-        except KeyError:
-            raise ValueError(
-                f"Chain '{chain_name}' is not registered. "
-                f"Check config/chains.py for valid chain names."
-            )
+        chain = _resolve_chain_by_name(chain_name_lower)
 
         chain_id = chain.chain_id
 
@@ -390,7 +405,7 @@ class TokenSecurityManager:
                 exc,
             )
             try:
-                chain = get_chain_by_name(chain_name)
+                chain = _resolve_chain_by_name(chain_name)
                 return self._resolve_via_simulation(candidates, chain_name, chain.rpc_url)
             except Exception:
                 raise TokenNotFoundError(
@@ -405,7 +420,7 @@ class TokenSecurityManager:
                 chain_id,
             )
             try:
-                chain = get_chain_by_name(chain_name)
+                chain = _resolve_chain_by_name(chain_name)
                 return self._resolve_via_simulation(candidates, chain_name, chain.rpc_url)
             except Exception:
                 raise TokenNotFoundError(
@@ -466,7 +481,7 @@ class TokenSecurityManager:
             chain_name,
         )
         try:
-            chain = get_chain_by_name(chain_name)
+            chain = _resolve_chain_by_name(chain_name)
             return self._resolve_via_simulation(candidates, chain_name, chain.rpc_url)
         except Exception:
             raise TokenNotFoundError(symbol=candidates[0].symbol, chain_name=chain_name)
@@ -537,7 +552,7 @@ class TokenSecurityManager:
 
     def _background_refresh(self, symbol: str, chain_id: int) -> None:
         try:
-            chain = get_chain_by_id(chain_id)
+            chain = _resolve_chain_by_id(chain_id)
             result = self._resolve_live(
                 symbol=symbol,
                 chain_name=chain.name.lower(),

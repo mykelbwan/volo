@@ -107,7 +107,7 @@ workflow.add_conditional_edges(
     "onboarding",
     _async_route(route_onboarding),
     {"end": END, "router": "conversational_router"},
-)  
+)
 workflow.add_conditional_edges(
     "conversational_router",
     _async_route(route_main),
