@@ -11,22 +11,21 @@ export interface AgentTurnRequest {
 }
 
 export interface AgentTurnResponse {
-    assistant_message?: string;
+    assistant_message?: string | null;
     conversation_id: string;
     thread_id: string;
-    selected_task_number?: number;
+    selected_task_number?: number | null;
     allocated_new_thread: boolean;
     blocked: boolean;
-    blocked_message?: string;
+    blocked_message?: string | null;
 }
 
 export class HttpAgentClient {
     private readonly turnUrl: string;
 
     constructor() {
-        // Read endpoint from env, default to 8080 if not defined
-        const baseUrl = process.env.MAIN_ENTRY || "http://127.0.0.1:8080";
-        this.turnUrl = `${baseUrl}/v1/agent/turn`;
+        const mainEntry = process.env.MAIN_ENTRY || "http://127.0.0.1:8080";
+        this.turnUrl = buildTurnUrl(mainEntry);
     }
 
     async runTurn(payload: AgentTurnRequest): Promise<AgentTurnResponse> {
@@ -46,9 +45,19 @@ export class HttpAgentClient {
 
             return (await response.json()) as AgentTurnResponse;
         } catch (error) {
-            throw new Error(`Agent API turn request failed: ${(error as Error).message}`);
+            throw new Error(
+                `Agent API turn request failed for ${this.turnUrl}: ${(error as Error).message}`,
+            );
         }
     }
 }
 
 export const agentClient = new HttpAgentClient();
+
+function buildTurnUrl(mainEntry: string): string {
+    const cleaned = mainEntry.replace(/\/+$/, "");
+    if (cleaned.endsWith("/v1/agent/turn")) {
+        return cleaned;
+    }
+    return `${cleaned}/v1/agent/turn`;
+}
