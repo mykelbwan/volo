@@ -28,7 +28,7 @@ def _api_base() -> str:
 
 class JupiterAggregator(SolanaSwapAggregator):
     name: str = "jupiter"
-    TIMEOUT_SECONDS: float = 8.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,

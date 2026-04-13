@@ -1,4 +1,4 @@
-import json
+import asyncio
 import logging
 import os
 import re
@@ -7,6 +7,7 @@ from typing import Sequence
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from core.conversation.account_query_parser import parse_account_query
+from core.token_security.token_db import TokenRegistryEntry, get_async_token_registry
 from core.utils.balance_chains import (
     ALL_SUPPORTED_CHAIN_KEY,
     canonicalize_balance_chain,
@@ -20,6 +21,7 @@ from intent_hub.utils.messages import format_with_recovery
 
 logger = logging.getLogger(__name__)
 _TOKEN_REGISTRY_CACHE: dict | None = None
+_TOKEN_REGISTRY_TIMEOUT_SECONDS = 2.0
 
 _SIMPLE_SWAP_PATTERNS = (
     re.compile(
@@ -53,6 +55,23 @@ _INCOMPLETE_SWAP_PATTERNS = (
         r"^\s*(?:swap|convert|exchange)\s+"
         r"(?P<amount>\d+(?:\.\d+)?)\s+"
         r"(?P<token_in>[a-zA-Z0-9._-]+)\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:swap|convert|exchange)\s+"
+        r"(?P<amount>\d+(?:\.\d+)?)\s+"
+        r"(?P<token_in>[a-zA-Z0-9._-]+)\s+"
+        r"(?:for|to|into)\s+"
+        r"(?P<token_out>[a-zA-Z0-9._-]+)\s*$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^\s*(?:buy|sell)\s+"
+        r"(?P<amount>\d+(?:\.\d+)?)\s+"
+        r"(?P<token_in>[a-zA-Z0-9._-]+)\s+"
+        r"worth(?:\s+of)?\s+"
+        r"(?P<token_out>[a-zA-Z0-9._-]+)"
+        r"(?:\s+on\s+(?P<chain>.+?))?\s*$",
         re.IGNORECASE,
     ),
 )
@@ -261,30 +280,79 @@ _BALANCE_PREFIX_CHAIN_RE = re.compile(
 )
 
 
-def _load_token_registry() -> dict:
-    registry_path = os.path.join(
-        os.path.dirname(__file__), "..", "registry", "tokens.json"
-    )
-    if not os.path.exists(registry_path):
-        return {}
+def _skip_mongodb_registry() -> bool:
+    value = os.getenv("SKIP_MONGODB_REGISTRY", "").strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    value = os.getenv("SKIP_MONGODB_HEALTHCHECK", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _token_registry_timeout_seconds() -> float:
+    raw = os.getenv("INTENT_TOKEN_REGISTRY_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return _TOKEN_REGISTRY_TIMEOUT_SECONDS
     try:
-        with open(registry_path, "r") as f:
-            data = json.load(f)
-    except Exception as exc:
-        logger.warning("_load_token_registry: failed to load tokens.json: %s", exc)
-        return {}
-    return data if isinstance(data, dict) else {}
+        value = float(raw)
+    except ValueError:
+        return _TOKEN_REGISTRY_TIMEOUT_SECONDS
+    if value <= 0:
+        return _TOKEN_REGISTRY_TIMEOUT_SECONDS
+    return value
+
+
+def _build_token_registry_payload(entries: Sequence[TokenRegistryEntry]) -> dict:
+    registry: dict[str, dict[str, object]] = {}
+    for entry in entries:
+        symbol = str(entry.symbol or "").strip().upper()
+        chain_name = str(entry.chain_name or "").strip().lower()
+        address = str(entry.address or "").strip()
+        if not symbol or not chain_name:
+            continue
+
+        token_data = registry.setdefault(symbol, {"aliases": [], "chains": {}})
+
+        aliases_raw = token_data.get("aliases")
+        aliases = aliases_raw if isinstance(aliases_raw, list) else []
+        if aliases_raw is not aliases:
+            token_data["aliases"] = aliases
+        alias_seen = {str(a).strip().lower() for a in aliases if str(a).strip()}
+        for alias in entry.aliases or []:
+            alias_text = str(alias or "").strip().lower()
+            if not alias_text or alias_text in alias_seen:
+                continue
+            alias_seen.add(alias_text)
+            aliases.append(alias_text)
+
+        chains_raw = token_data.get("chains")
+        chains = chains_raw if isinstance(chains_raw, dict) else {}
+        if chains_raw is not chains:
+            token_data["chains"] = chains
+        chain_payload: dict[str, object] = {}
+        if address:
+            chain_payload["address"] = address
+        if entry.decimals is not None:
+            chain_payload["decimals"] = int(entry.decimals)
+        chains[chain_name] = chain_payload
+
+    return registry
 
 
 async def _get_token_registry_async() -> dict:
     global _TOKEN_REGISTRY_CACHE
     if _TOKEN_REGISTRY_CACHE is not None:
         return _TOKEN_REGISTRY_CACHE
+    if _skip_mongodb_registry():
+        _TOKEN_REGISTRY_CACHE = {}
+        return _TOKEN_REGISTRY_CACHE
+
     try:
-        # Local registry load is a tiny filesystem read and returns immediately
-        # when the registry file is absent. Keeping it synchronous avoids the
-        # threadpool timeout overhead that shows up in fast parser paths.
-        _TOKEN_REGISTRY_CACHE = _load_token_registry()
+        registry = get_async_token_registry()
+        entries = await asyncio.wait_for(
+            registry.list_active_entries(),
+            timeout=_token_registry_timeout_seconds(),
+        )
+        _TOKEN_REGISTRY_CACHE = _build_token_registry_payload(entries)
     except Exception as exc:
         logger.warning("_get_token_registry_async: failed to load token registry: %s", exc)
         _TOKEN_REGISTRY_CACHE = {}
@@ -536,6 +604,9 @@ def _parse_incomplete_swap_message(messages: Sequence[BaseMessage]) -> Sequence[
             "token_in": {"symbol": token_in},
             "amount": amount,
         }
+        token_out = match.groupdict().get("token_out")
+        if token_out and not _looks_pure_numeric(token_out):
+            slots["token_out"] = {"symbol": token_out.upper()}
         if chain:
             slots["chain"] = chain.strip().lower()
         return [

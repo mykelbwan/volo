@@ -1,7 +1,8 @@
 from decimal import Decimal
 from typing import cast
 
-from config.chains import get_chain_by_name
+from core.chains.catalog import resolve_chain
+from core.identity.wallet_bindings import wallet_markers_for_family
 from core.token_security.registry_lookup import get_registry_decimals_by_address_async
 from intent_hub.ontology.intent import ExecutionPlan, Intent
 from intent_hub.registry.token_service import (
@@ -25,10 +26,22 @@ async def resolve_bridge(intent: Intent) -> ExecutionPlan:
 
     slots = intent.slots or {}
     symbol = symbol_from_slot(slots.get("token_in"))
-    source_chain = require_non_empty_str(slots.get("chain"), field="chain").lower()
-    target_chain = require_non_empty_str(
+    requested_source_chain = require_non_empty_str(
+        slots.get("chain"), field="chain"
+    ).lower()
+    requested_target_chain = require_non_empty_str(
         slots.get("target_chain"), field="target_chain"
     ).lower()
+    source_chain_entry = resolve_chain(requested_source_chain)
+    target_chain_entry = resolve_chain(requested_target_chain)
+    if source_chain_entry is None:
+        raise ValueError(f"Invalid source chain: {requested_source_chain}")
+    if target_chain_entry is None:
+        raise ValueError(f"Invalid target chain: {requested_target_chain}")
+
+    source_chain = str(source_chain_entry.key).strip().lower()
+    target_chain = str(target_chain_entry.key).strip().lower()
+    wallet_markers = wallet_markers_for_family(source_chain_entry.family)
 
     if not symbol:
         raise ValueError(
@@ -66,22 +79,39 @@ async def resolve_bridge(intent: Intent) -> ExecutionPlan:
             discovered_target, target_chain
         )
 
+    source_native_symbol = str(source_chain_entry.native_symbol or "").strip().upper()
+    source_native_asset_ref = str(source_chain_entry.native_asset_ref or "").strip()
+    target_native_symbol = str(target_chain_entry.native_symbol or "").strip().upper()
+    target_native_asset_ref = str(target_chain_entry.native_asset_ref or "").strip()
+    if (
+        not source_address
+        and symbol_resolved.upper() == source_native_symbol
+        and source_native_asset_ref
+    ):
+        source_address = source_native_asset_ref
+    if (
+        not target_address
+        and symbol_resolved.upper() == target_native_symbol
+        and target_native_asset_ref
+    ):
+        target_address = target_native_asset_ref
+
     if not source_address or not target_address:
         raise unresolved_addresses_error(
             [symbol_resolved],
             chain_context=f"{source_chain}/{target_chain}",
         )
 
-    try:
-        source_chain_cfg = get_chain_by_name(source_chain)
-    except Exception:
-        raise ValueError(f"Invalid source chain: {source_chain}")
-
     decimals = token_data.get("decimals")
     if decimals is None:
-        decimals = await get_registry_decimals_by_address_async(
-            source_address, source_chain_cfg.chain_id
-        )
+        if source_native_asset_ref and (
+            str(source_address).strip().lower() == source_native_asset_ref.lower()
+        ):
+            decimals = 9 if source_chain_entry.family == "solana" else 18
+        else:
+            decimals = await get_registry_decimals_by_address_async(
+                source_address, int(source_chain_entry.chain_id)
+            )
 
     if decimals is None:
         raise ValueError(f"Could not resolve decimals for {symbol_resolved}")
@@ -106,8 +136,8 @@ async def resolve_bridge(intent: Intent) -> ExecutionPlan:
             "target_address": target_address,
             "amount": amount_val,
             "amount_in_wei": amount_in_wei,
-            "sub_org_id": "{{SUB_ORG_ID}}",
-            "sender": "{{SENDER_ADDRESS}}",
+            "sub_org_id": wallet_markers.sub_org_marker,
+            "sender": wallet_markers.sender_marker,
         },
         constraints=intent.constraints,
     )

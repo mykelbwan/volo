@@ -76,7 +76,6 @@ class TokenRegistryEntry:
             "address": self.address,
             "address_lower": self.address.strip().lower(),
             "decimals": self.decimals,
-            # Always store aliases in lowercase to make the index effective
             "aliases": [a.lower() for a in self.aliases],
             "is_active": self.is_active,
             "source": self.source,
@@ -202,6 +201,19 @@ class TokenRegistryDB:
         doc = entry.to_doc()
         self._col.replace_one({"_reg_key": entry.reg_key}, doc, upsert=True)
 
+    def list_active_entries(self) -> list[TokenRegistryEntry]:
+        docs = self._col.find({"is_active": True})
+        entries: list[TokenRegistryEntry] = []
+        for doc in docs:
+            try:
+                entries.append(TokenRegistryEntry.from_doc(doc))
+            except Exception as exc:
+                logger.warning(
+                    "TokenRegistryDB.list_active_entries: failed to deserialise entry: %s",
+                    exc,
+                )
+        return entries
+
 
 _REGISTRY: Optional[TokenRegistryDB] = None
 _ASYNC_REGISTRY: Optional["AsyncTokenRegistryDB"] = None
@@ -313,6 +325,20 @@ class AsyncTokenRegistryDB:
         await self.ensure_indexes()
         doc = entry.to_doc()
         await self._col.replace_one({"_reg_key": entry.reg_key}, doc, upsert=True)
+
+    async def list_active_entries(self) -> list[TokenRegistryEntry]:
+        await self.ensure_indexes()
+        cursor = self._col.find({"is_active": True})
+        entries: list[TokenRegistryEntry] = []
+        async for doc in cursor:
+            try:
+                entries.append(TokenRegistryEntry.from_doc(doc))
+            except Exception as exc:
+                logger.warning(
+                    "AsyncTokenRegistryDB.list_active_entries: failed to deserialise entry: %s",
+                    exc,
+                )
+        return entries
 
 
 def get_token_registry() -> TokenRegistryDB:

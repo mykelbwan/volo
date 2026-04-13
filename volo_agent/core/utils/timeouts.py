@@ -18,8 +18,8 @@ def _get_float(env_key: str, default: float) -> float:
 
 # Global timeouts (seconds) for async nodes, blocking tool calls, and HTTP I/O.
 NODE_TIMEOUT_SECONDS = _get_float("NODE_TIMEOUT_SECONDS", 120.0)
-TOOL_TIMEOUT_SECONDS = _get_float("TOOL_TIMEOUT_SECONDS", 30.0)
-EXTERNAL_HTTP_TIMEOUT_SECONDS = _get_float("EXTERNAL_HTTP_TIMEOUT_SECONDS", 10.0)
+TOOL_TIMEOUT_SECONDS = _get_float("TOOL_TIMEOUT_SECONDS", 60.0)
+EXTERNAL_HTTP_TIMEOUT_SECONDS = _get_float("EXTERNAL_HTTP_TIMEOUT_SECONDS", 60.0)
 
 # Per-tool default timeouts (seconds). Can be overridden via
 # TOOL_TIMEOUT_SECONDS_<TOOLNAME> env vars at runtime.
@@ -45,15 +45,6 @@ def _parse_timeout_value(value: str | None) -> float | None:
 
 
 def resolve_tool_timeout(tool_name: str | None, explicit: float | None) -> float | None:
-    """
-    Resolve the effective timeout for a tool.
-
-    Precedence:
-      1. TOOL_TIMEOUT_SECONDS_<TOOLNAME> env override
-      2. explicit timeout (tool-level config)
-      3. TOOL_DEFAULT_TIMEOUTS fallback for known tools
-      4. TOOL_TIMEOUT_SECONDS global default
-    """
     name = (tool_name or "").strip().lower()
     if name:
         env_key = f"TOOL_TIMEOUT_SECONDS_{name.upper()}"

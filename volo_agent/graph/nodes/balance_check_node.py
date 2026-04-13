@@ -87,7 +87,9 @@ def _is_native(address: str, chain) -> bool:
     return str(address or "").strip().lower() == _NATIVE
 
 
-def _resolve_balance_chain(args: Dict[str, Any], tool: str | None = None) -> _BalanceChainContext | None:
+def _resolve_balance_chain(
+    args: Dict[str, Any], tool: str | None = None
+) -> _BalanceChainContext | None:
     fee_chain = resolve_fee_chain(args, tool=tool)
     if fee_chain is None:
         return None
@@ -825,7 +827,9 @@ async def run_vws_preflight(state: AgentState) -> Dict[str, Any]:
         if node.tool == "transfer":
             try:
                 transfer_meta = resolve_transfer_planning_metadata(args)
-                chain_ctx = _resolve_balance_chain({"network": transfer_meta.network}, tool=node.tool)
+                chain_ctx = _resolve_balance_chain(
+                    {"network": transfer_meta.network}, tool=node.tool
+                )
             except ValueError:
                 continue
             except Exception:

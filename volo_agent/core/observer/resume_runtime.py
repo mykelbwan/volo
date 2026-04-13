@@ -28,13 +28,6 @@ async def resume_thread(
     deps: ResumeRuntimeDeps,
     stats: MutableMapping[str, int],
 ) -> None:
-    """
-    Claim a matched trigger and resume its LangGraph thread.
-
-    The watcher provides the registry methods and stats container, while this
-    runtime owns the resume transaction itself: idempotent claim, bounded
-    stream drain, and failure marking with clear diagnostics.
-    """
     trigger_id = match.trigger_id
     thread_id = match.thread_id
     user_id = match.user_id

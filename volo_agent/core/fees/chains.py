@@ -20,14 +20,15 @@ class FeeChain:
     wrapped_native_ref: Optional[str] = None
 
 
-def resolve_fee_chain(node_args: dict[str, Any], tool: str | None = None) -> FeeChain | None:
-    # ── Logic ─────────────────────────────────────────────────────────
+def resolve_fee_chain(
+    node_args: dict[str, Any], tool: str | None = None
+) -> FeeChain | None:
+    # Logic
     # For bridges, we REQUIRE source_chain.  If it is missing, we do NOT
     # fall back to the generic 'chain' parameter (which is often set to
     # a default like 'somnia' in the AgentState).
     #
     # For swaps and other tools, 'chain' or 'network' is the primary key.
-    # ──────────────────────────────────────────────────────────────────
     normalized_tool = str(tool or "").strip().lower()
     is_bridge = normalized_tool == "bridge"
 
@@ -84,6 +85,9 @@ def is_native_token(token_ref: str | None, chain: FeeChain) -> bool:
 
     if token == str(chain.native_token_ref).strip().lower():
         return True
-    if chain.wrapped_native_ref and token == str(chain.wrapped_native_ref).strip().lower():
+    if (
+        chain.wrapped_native_ref
+        and token == str(chain.wrapped_native_ref).strip().lower()
+    ):
         return True
     return False

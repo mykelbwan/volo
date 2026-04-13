@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 
 def build_summary(data: Dict[str, Any]) -> str:
-    """Build the planner-prompt performance string from a flat stats dict."""
     if not data:
         return "No previous execution history available."
 
@@ -44,7 +43,6 @@ def build_summary(data: Dict[str, Any]) -> str:
 
 
 def build_fee_revenue_summary(data: Dict[str, Any]) -> str:
-    """Build the human-readable fee revenue table from a flat stats dict."""
     lines: List[str] = []
     total_entries = 0
 
@@ -72,7 +70,6 @@ def build_fee_revenue_summary(data: Dict[str, Any]) -> str:
 
 
 def aggregate_revenue(data: Dict[str, Any], field_index: int) -> Dict[str, Decimal]:
-    """Aggregate fee_revenue_native by tool (index 0) or chain (index 1)."""
     totals: Dict[str, Decimal] = {}
     for key, stats in data.items():
         if ":" not in key:
@@ -85,7 +82,6 @@ def aggregate_revenue(data: Dict[str, Any], field_index: int) -> Dict[str, Decim
 
 
 def resolve_native_symbol(chain_lower: str) -> str:
-    """Best-effort lookup of the native token symbol for a chain name."""
     try:
         from config.chains import get_chain_by_name
 

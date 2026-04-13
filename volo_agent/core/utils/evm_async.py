@@ -16,7 +16,6 @@ _SHARED_AIOHTTP_SESSIONS_LOCK = threading.Lock()
 
 
 async def _get_shared_aiohttp_session() -> Any | None:
-    """Return one shared aiohttp session per event loop for AsyncWeb3 providers."""
     try:
         import aiohttp  # type: ignore
     except Exception:
@@ -44,7 +43,6 @@ async def _get_shared_aiohttp_session() -> Any | None:
 
 
 async def close_shared_async_web3_sessions() -> None:
-    """Close pooled aiohttp sessions used by AsyncWeb3 providers."""
     with _SHARED_AIOHTTP_SESSIONS_LOCK:
         sessions = list(_SHARED_AIOHTTP_SESSIONS.values())
         _SHARED_AIOHTTP_SESSIONS.clear()
@@ -57,13 +55,10 @@ async def close_shared_async_web3_sessions() -> None:
 
 
 def _build_async_web3(rpc_url: str) -> Any:
-    """Construct an AsyncWeb3 instance without blocking on network I/O."""
     try:
         from web3 import AsyncWeb3  # type: ignore
     except Exception as exc:
-        raise RuntimeError(
-            "Async Web3 is not available. "
-        ) from exc
+        raise RuntimeError("Async Web3 is not available. ") from exc
 
     try:
         from web3.providers.async_rpc import AsyncHTTPProvider  # type: ignore
@@ -83,7 +78,6 @@ def _build_async_web3(rpc_url: str) -> Any:
 
 
 async def get_shared_async_web3(rpc_url: str) -> Any:
-    """Build AsyncWeb3 with a shared aiohttp session for connection reuse."""
     w3 = _build_async_web3(rpc_url)
     cache_async_session = getattr(w3.provider, "cache_async_session", None)
     if callable(cache_async_session):
@@ -92,7 +86,7 @@ async def get_shared_async_web3(rpc_url: str) -> Any:
             if session is not None:
                 # Reusing one ClientSession per loop preserves keep-alive and avoids
                 # allocating a fresh TCP connector for each AsyncWeb3 instance.
-                await cache_async_session(session)
+                cache_async_session(session)
         except Exception:
             # Session injection is a best-effort optimization; the provider can
             # still fall back to its native transport if this hook is unavailable.
@@ -101,7 +95,6 @@ async def get_shared_async_web3(rpc_url: str) -> Any:
 
 
 def make_async_web3(rpc_url: str):
-    """Return AsyncWeb3 immediately, upgrading to the shared session when possible."""
     w3 = _build_async_web3(rpc_url)
     try:
         loop = asyncio.get_running_loop()
@@ -110,11 +103,12 @@ def make_async_web3(rpc_url: str):
 
     cache_async_session = getattr(w3.provider, "cache_async_session", None)
     if callable(cache_async_session):
+
         async def _attach_shared_session() -> None:
             try:
                 session = await _get_shared_aiohttp_session()
                 if session is not None:
-                    await cache_async_session(session)
+                    cache_async_session(session)
             except Exception:
                 pass
 

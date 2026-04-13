@@ -16,7 +16,6 @@ from core.utils.http import async_request_json
 
 logger = logging.getLogger(__name__)
 
-# ── CoinGecko symbol map ─────────────────────────────────────────────────────
 # Maps uppercase asset symbol → CoinGecko coin ID.
 # Add entries here when you want to support additional assets.
 COINGECKO_ID_MAP: dict[str, str] = {
@@ -117,7 +116,6 @@ class PriceCache:
         return key_for_symbol(key) or key.upper()
 
     async def set(self, asset: str, price: float) -> None:
-        """Update the cached price for an asset."""
         key = self._normalize_key(asset)
         async with self._lock:
             self._prices[key] = price
@@ -130,44 +128,29 @@ class PriceCache:
                 logger.warning("PriceCache on_update callback raised: %s", exc)
 
     async def get(self, asset: str) -> Optional[float]:
-        """Return the latest cached price for an asset, or None if unknown."""
         key = self._normalize_key(asset)
         async with self._lock:
             return self._prices.get(key)
 
     def get_sync(self, asset: str) -> Optional[float]:
-        """Synchronous read (no lock) — safe to call from non-async code."""
         key = self._normalize_key(asset)
         return self._prices.get(key)
 
     async def snapshot(self) -> dict[str, float]:
-        """Return a copy of all cached prices."""
         async with self._lock:
             return dict(self._prices)
 
     def age_seconds(self, asset: str) -> Optional[float]:
-        """
-        Return how many seconds have elapsed since the last update for
-        ``asset``, or None if it has never been seen.
-        """
         key = self._normalize_key(asset)
         ts = self._timestamps.get(key)
         return (time.time() - ts) if ts is not None else None
 
     def is_stale(self, asset: str, max_age_seconds: float = 300) -> bool:
-        """
-        Return True if the cached price for ``asset`` is older than
-        ``max_age_seconds`` (default 5 minutes) or has never been set.
-        """
         age = self.age_seconds(asset)
         return age is None or age > max_age_seconds
 
     def all_assets(self) -> list[str]:
-        """Return a sorted list of all assets currently in the cache."""
         return sorted(self._prices.keys())
-
-
-# ── REST polling ──────────────────────────────────────────────────────────────
 
 
 async def fetch_price_coingecko(
@@ -326,9 +309,6 @@ async def fetch_prices_dexscreener(
 async def fetch_price_dexscreener_token(
     token: DexTokenRef, _client: object | None = None
 ) -> Optional[float]:
-    """
-    Fetch the current USD price for a specific token address on a chain.
-    """
     url = f"{_DEXSCREENER_REST_BASE}{_DEXSCREENER_TOKEN_PAIRS_ENDPOINT.format(chain=token.chain_slug, token=token.address)}"
     try:
         resp = await async_request_json(
@@ -376,9 +356,6 @@ async def fetch_price_dexscreener_token(
 async def fetch_prices_dexscreener_tokens(
     tokens: list[DexTokenRef], client: object | None = None
 ) -> dict[str, float]:
-    """
-    Fetch prices for multiple chain-address tokens via Dexscreener.
-    """
     if not tokens:
         return {}
 
@@ -478,24 +455,13 @@ class PriceObserver:
         self._logged_empty_watchlist = False
 
     def stop(self) -> None:
-        """Signal both polling and WebSocket loops to exit cleanly."""
         self._stop_event.set()
 
     async def set_dex_tokens(self, tokens: list[DexTokenRef]) -> None:
-        """
-        Replace the current Dexscreener token watchlist (chain-aware).
-
-        Keys are based on ``price_key`` (e.g. "ethereum:0x...").
-        """
         async with self._dex_lock:
             self._dex_tokens = {t.price_key: t for t in tokens if t}
 
     async def set_symbols(self, symbols: list[str]) -> None:
-        """
-        Replace the current symbol watchlist (CoinGecko + Dexscreener).
-
-        Passing an empty list disables CoinGecko polling until updated.
-        """
         normalized = [s.upper() for s in symbols if s]
         async with self._symbol_lock:
             self.symbols = normalized
@@ -522,8 +488,6 @@ class PriceObserver:
                 sorted(added),
                 len(merged),
             )
-
-    # ── REST polling loop ─────────────────────────────────────────────────────
 
     async def run_rest_polling(self, poll_interval: float = 60.0) -> None:
         logger.info(
@@ -556,19 +520,19 @@ class PriceObserver:
 
                 self._logged_empty_watchlist = False
 
-                # 1) CoinGecko batch for supported assets
+                # CoinGecko batch for supported assets
                 if coingecko_symbols:
                     coingecko_prices = await fetch_prices_batch_coingecko(
                         coingecko_symbols
                     )
                     prices.update(coingecko_prices)
 
-                # 2) Dexscreener search for non-CoinGecko assets
+                # Dexscreener search for non-CoinGecko assets
                 if dex_symbols:
                     dex_prices = await fetch_prices_dexscreener(dex_symbols)
                     prices.update(dex_prices)
 
-                # 3) Dexscreener token address pricing (chain-aware)
+                # Dexscreener token address pricing (chain-aware)
                 if dex_tokens:
                     dex_token_prices = await fetch_prices_dexscreener_tokens(dex_tokens)
                     prices.update(dex_token_prices)

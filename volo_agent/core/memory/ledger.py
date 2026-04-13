@@ -1,24 +1,3 @@
-"""
-core/memory/ledger.py
----------------------
-Performance ledger — records tool execution outcomes, error patterns, and
-fee revenue keyed by "tool:chain".
-
-Primary backend  : MongoDB (atomic pipeline upserts; thread- and
-                   multi-instance-safe).
-Fallback backend : local JSON file (single-process only; used when MongoDB
-                   is unavailable, e.g. local development without a DB).
-
-Obtain an instance via the module-level singleton helper::
-
-    from core.memory.ledger import get_ledger
-    ledger = get_ledger()
-
-Never call ``PerformanceLedger()`` directly at a call-site — doing so
-performs a fresh availability check on every invocation and bypasses the
-connection-reuse benefit of the singleton.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -41,30 +20,18 @@ from core.memory.ledger_reports import (
     build_summary,
 )
 
-# ---------------------------------------------------------------------------
-# Error taxonomy
-# ---------------------------------------------------------------------------
-
 
 class ErrorCategory(str, Enum):
-    """
-    Categorises failures to help the system decide on recovery strategies.
-    """
-
     NONE = "none"
-    NETWORK = "network"  # RPC timeouts, provider 503s, transport errors
-    LIQUIDITY = "liquidity"  # Insufficient liquidity for swap/bridge routes
-    SLIPPAGE = "slippage"  # Price impact exceeded user/system bounds
-    GAS = "gas"  # Insufficient gas or gas price spike
-    SECURITY = "security"  # Guardrail violations (risk, blacklist, limits)
-    LOGIC = "logic"  # Invalid parameters, schema mismatch, tool logic
-    NON_RETRYABLE = "non_retryable"  # Explicit stop condition (do not retry)
-    UNKNOWN = "unknown"  # Unclassified exceptions
+    NETWORK = "network"
+    LIQUIDITY = "liquidity"
+    SLIPPAGE = "slippage"
+    GAS = "gas"
+    SECURITY = "security"
+    LOGIC = "logic"
+    NON_RETRYABLE = "non_retryable"
+    UNKNOWN = "unknown"
 
-
-# ---------------------------------------------------------------------------
-# Internal constants
-# ---------------------------------------------------------------------------
 
 _COLLECTION = "performance_ledger"
 _RECENT_ERRORS_LIMIT = 5
@@ -130,24 +97,12 @@ def _fee_update_pipeline(fee_amount_native: Decimal) -> List[Dict[str, Any]]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# File-based fallback (single-process / no-MongoDB environments)
-# ---------------------------------------------------------------------------
-
-
 class _FileLedger:
-    """
-    JSON-file-backed ledger used as a fallback when MongoDB is unavailable.
-    Not safe for concurrent writes across threads or processes.
-    """
-
     _DEFAULT_PATH = "performance_ledger.json"
 
     def __init__(self, storage_path: str = _DEFAULT_PATH) -> None:
         self.storage_path = storage_path
         self.data: Dict[str, Any] = self._load()
-
-    # ── Persistence ───────────────────────────────────────────────────────────
 
     def _load(self) -> Dict[str, Any]:
         if os.path.exists(self.storage_path):
@@ -171,8 +126,6 @@ class _FileLedger:
         else:
             for k, v in _DOC_DEFAULTS.items():
                 self.data[key].setdefault(k, v)
-
-    # ── Public API ────────────────────────────────────────────────────────────
 
     def get_stats(self, key: str) -> Optional[Dict[str, Any]]:
         return self.data.get(key)
@@ -247,38 +200,7 @@ class _FileLedger:
         return sum(v.get("successes", 0) for v in self.data.values())
 
 
-# ---------------------------------------------------------------------------
-# MongoDB-backed primary implementation
-# ---------------------------------------------------------------------------
-
-
 class PerformanceLedger:
-    """
-    Persistent record of tool performance, error patterns, and fee revenue.
-
-    Backed by MongoDB with atomic aggregation-pipeline upserts (requires
-    MongoDB 4.2+).  All counter increments and the rolling avg_time are
-    computed server-side in a single round-trip — no read-before-write race
-    regardless of how many agent instances write concurrently.
-
-    Automatically falls back to ``_FileLedger`` when MongoDB is unavailable
-    so the rest of the system never needs to handle the absence of a ledger.
-
-    Storage layout (one MongoDB document per "tool:chain" key):
-
-        _id                   "swap:base"
-        successes             int
-        failures              int
-        consecutive_failures  int
-        total_runs            int
-        avg_time              float   (rolling average, seconds)
-        last_run              ISO-8601 string
-        error_distribution    { category: count, ... }
-        recent_errors         [ {timestamp, msg, category}, ... ]  — max 5
-        fee_revenue_native    str(Decimal)
-        fee_collections       int
-    """
-
     def __init__(self) -> None:
         self._col = None
         self._async_col = None
@@ -320,21 +242,10 @@ class PerformanceLedger:
         async with self._async_index_lock:
             if self._async_indexes_ready or not self._async_available:
                 return
-            # _id has a built-in unique index; no extra indexes required here.
             self._async_indexes_ready = True
-
-    # ── Backward-compatible full-data property ────────────────────────────────
 
     @property
     def data(self) -> Dict[str, Any]:
-        """
-        Return all records as ``{tool:chain -> stats_dict}``.
-
-        Retained for backward compatibility with ``CircuitBreaker`` and any
-        other code that iterates the full dataset.  For single-key lookups
-        call ``get_stats(key)`` instead — it issues a targeted find_one
-        rather than a full collection scan.
-        """
         if not self._available:
             return self._fallback.data  # type: ignore[union-attr]
         try:
@@ -345,16 +256,7 @@ class PerformanceLedger:
         except Exception:
             return {}
 
-    # ── Targeted single-key lookup ────────────────────────────────────────────
-
     def get_stats(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        Return the stats dict for one ``tool:chain`` key, or ``None``.
-
-        More efficient than ``ledger.data.get(key)`` because it issues a
-        single targeted ``find_one`` rather than scanning the whole collection.
-        Used by the route scorer to retrieve per-aggregator success rates.
-        """
         if not self._available:
             return self._fallback.get_stats(key)  # type: ignore[union-attr]
         try:
@@ -365,8 +267,6 @@ class PerformanceLedger:
         except Exception:
             return None
 
-    # ── Writes ────────────────────────────────────────────────────────────────
-
     def record_execution(
         self,
         tool: str,
@@ -376,21 +276,6 @@ class PerformanceLedger:
         error_msg: Optional[str] = None,
         category: ErrorCategory = ErrorCategory.NONE,
     ) -> None:
-        """
-        Atomically record a single tool execution outcome.
-
-        Uses a two-stage aggregation pipeline upsert so the rolling
-        ``avg_time`` is computed server-side — no extra round-trip needed.
-
-        Stage 1  — increment counters, prepend the error entry (on failure),
-                   and seed missing fields on new documents.
-        Stage 2  — recompute ``avg_time`` from the already-incremented
-                   ``total_runs`` produced by stage 1.
-
-        On failure an additional plain ``$inc`` updates the nested
-        ``error_distribution.{category}`` counter using dot notation, which
-        is simpler and more readable than the equivalent pipeline expression.
-        """
         if not self._available:
             self._fallback.record_execution(  # type: ignore[union-attr]
                 tool, chain, success, execution_time, error_msg, category
@@ -399,11 +284,6 @@ class PerformanceLedger:
 
         key = f"{tool}:{chain.lower()}"
         now = datetime.now(timezone.utc).isoformat()
-
-        # Shared stage 2: rolling average expression.
-        # At this point $total_runs already holds the post-increment value
-        # from stage 1, so the formula is:
-        #   new_avg = (old_avg × (new_total − 1) + execution_time) / new_total
         _avg_expr: Dict[str, Any] = {
             "$cond": {
                 "if": {"$gt": [execution_time, 0.0]},
@@ -523,14 +403,6 @@ class PerformanceLedger:
         chain: str,
         fee_amount_native: Decimal,
     ) -> None:
-        """
-        Accumulate a successfully collected platform fee.
-
-        ``fee_revenue_native`` is stored as a Decimal-serialised string to
-        preserve precision.  The addition is performed client-side after a
-        targeted projection read; the race window is negligible because fee
-        collections are sequential per execution and rare across instances.
-        """
         if not self._available:
             self._fallback.record_fee(tool, chain, fee_amount_native)  # type: ignore[union-attr]
             return
@@ -555,11 +427,6 @@ class PerformanceLedger:
         error_msg: Optional[str] = None,
         category: ErrorCategory = ErrorCategory.NONE,
     ) -> None:
-        """
-        Async counterpart to ``record_execution`` using Motor.
-
-        Falls back to the file ledger if async Mongo is unavailable.
-        """
         if not self._async_available:
             self._fallback_ledger().record_execution(
                 tool, chain, success, execution_time, error_msg, category
@@ -678,11 +545,6 @@ class PerformanceLedger:
         chain: str,
         fee_amount_native: Decimal,
     ) -> None:
-        """
-        Async counterpart to ``record_fee`` using Motor.
-
-        Falls back to the file ledger if async Mongo is unavailable.
-        """
         if not self._async_available:
             self._fallback_ledger().record_fee(tool, chain, fee_amount_native)
             return
@@ -698,13 +560,7 @@ class PerformanceLedger:
         except Exception:
             self._fallback_ledger().record_fee(tool, chain, fee_amount_native)
 
-    # ── Reads / summaries ─────────────────────────────────────────────────────
-
     def get_summary(self) -> str:
-        """
-        Concise performance summary for the Planner's system prompt.
-        Includes semantic error distribution and most recent failure context.
-        """
         if not self._available:
             return self._fallback.get_summary()  # type: ignore[union-attr]
         try:
@@ -717,7 +573,6 @@ class PerformanceLedger:
             return "No previous execution history available."
 
     def get_fee_revenue_summary(self) -> str:
-        """Human-readable table of accumulated fee revenue per tool and chain."""
         if not self._available:
             return self._fallback.get_fee_revenue_summary()  # type: ignore[union-attr]
         try:
@@ -730,7 +585,6 @@ class PerformanceLedger:
             return "No fee revenue recorded yet."
 
     def get_fee_revenue_by_tool(self) -> Dict[str, Decimal]:
-        """Aggregate fee revenue across all chains, grouped by tool."""
         if not self._available:
             return self._fallback.get_fee_revenue_by_tool()  # type: ignore[union-attr]
         try:
@@ -754,7 +608,6 @@ class PerformanceLedger:
             return {}
 
     def get_fee_revenue_by_chain(self) -> Dict[str, Decimal]:
-        """Aggregate fee revenue across all tools, grouped by chain."""
         if not self._available:
             return self._fallback.get_fee_revenue_by_chain()  # type: ignore[union-attr]
         try:
@@ -778,7 +631,6 @@ class PerformanceLedger:
             return {}
 
     def get_total_lifetime_txs(self, sender: str = "") -> int:
-        """Total number of successful executions across all tools and chains."""
         if not self._available:
             return self._fallback.get_total_lifetime_txs(sender)  # type: ignore[union-attr]
         try:
@@ -789,28 +641,10 @@ class PerformanceLedger:
             return 0
 
 
-# ---------------------------------------------------------------------------
-# Module-level singleton
-# ---------------------------------------------------------------------------
-
 _ledger_instance: Optional[PerformanceLedger] = None
 
 
 def get_ledger() -> PerformanceLedger:
-    """
-    Return the process-level ``PerformanceLedger`` singleton.
-
-    The first call creates the instance (performing the MongoDB availability
-    check once) and caches it.  All subsequent calls return the same object,
-    reusing the underlying MongoDB collection handle without re-checking
-    connectivity on every invocation.
-
-    This is the preferred way to obtain a ledger at any call site::
-
-        from core.memory.ledger import get_ledger
-        ledger = get_ledger()
-        ledger.record_execution("swap", "base", success=True, execution_time=1.2)
-    """
     global _ledger_instance
     if _ledger_instance is None:
         _ledger_instance = PerformanceLedger()

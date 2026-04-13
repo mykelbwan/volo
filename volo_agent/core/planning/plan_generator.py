@@ -19,7 +19,6 @@ _LABEL_BRIDGE_FIRST = "bridge_first"
 
 
 def _get_chain_id(chain_name: str) -> Optional[int]:
-    """Return the registered chain ID for *chain_name*."""
     name = chain_name.strip().lower()
     if is_solana_network(name):
         try:

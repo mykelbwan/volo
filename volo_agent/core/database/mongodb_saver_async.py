@@ -1,10 +1,3 @@
-"""
-AsyncMongoDBSaver – async LangGraph BaseCheckpointSaver backed by Motor.
-
-This is the async counterpart to MongoDBSaver. Use it for async graph
-execution to avoid blocking the event loop.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -38,12 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncMongoDBSaver(BaseCheckpointSaver):
-    """
-    Async checkpointer backed by Motor (non-blocking).
-
-    Sync methods are supported only when called outside a running event loop.
-    """
-
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._db = AsyncMongoDB.get_db(_DB_NAME)
@@ -52,8 +39,6 @@ class AsyncMongoDBSaver(BaseCheckpointSaver):
         self._writes: AsyncIOMotorCollection = self._db[_COL_WRITES]
         self._indexes_ready = False
         self._index_lock: Optional[asyncio.Lock] = None
-
-    # ── Index setup ────────────────────────────────────────────────────────
 
     async def _ensure_indexes(self) -> None:
         if self._indexes_ready:
@@ -143,8 +128,6 @@ class AsyncMongoDBSaver(BaseCheckpointSaver):
                 unique=True,
             )
 
-    # ── Version generator ────────────────────────────────────────────────────
-
     def get_next_version(self, current: Optional[str], channel: Any) -> str:  # type: ignore[override]
         if current is None:
             current_v = 0
@@ -155,8 +138,6 @@ class AsyncMongoDBSaver(BaseCheckpointSaver):
         next_v = current_v + 1
         next_h = random.random()
         return f"{next_v:032}.{next_h:016}"
-
-    # ── Internal helpers ────────────────────────────────────────────────────
 
     async def _load_checkpoint_channel_versions(
         self,
@@ -359,8 +340,6 @@ class AsyncMongoDBSaver(BaseCheckpointSaver):
             pending_writes=pending_writes,
         )
 
-    # ── Sync wrappers (for non-async contexts only) ─────────────────────────
-
     def _run_sync(self, async_fn, *args, **kwargs):
         try:
             asyncio.get_running_loop()
@@ -404,8 +383,6 @@ class AsyncMongoDBSaver(BaseCheckpointSaver):
 
     def delete_thread(self, thread_id: str) -> None:
         return self._run_sync(self.adelete_thread, thread_id)
-
-    # ── Async implementations ────────────────────────────────────────────────
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         await self._ensure_indexes()

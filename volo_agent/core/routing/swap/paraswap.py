@@ -30,11 +30,6 @@ _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 _SIDE_SELL = "SELL"
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _partner() -> Optional[str]:
     return os.getenv("PARASWAP_PARTNER", "").strip() or None
 
@@ -44,7 +39,6 @@ def _partner_fee_wallet() -> Optional[str]:
 
 
 def _normalise_token_address(address: str, chain_id: int) -> str:
-    """Map any native-token alias to the ParaSwap native-token sentinel."""
     addr = address.strip().lower()
     # ParaSwap specifically requires 0xeee... for native tokens.
     # We check against our chain-specific aliases (e.g. 0x0, 0xeee).
@@ -72,11 +66,6 @@ def _to_wei(amount: Decimal, decimals: int) -> int:
 
 def _from_wei(amount_wei: int, decimals: int) -> Decimal:
     return Decimal(amount_wei) / Decimal(10**decimals)
-
-
-# ---------------------------------------------------------------------------
-# Async HTTP helpers
-# ---------------------------------------------------------------------------
 
 
 async def _fetch_prices(
@@ -130,9 +119,6 @@ async def _fetch_transaction(
     slippage_pct: float,
     timeout: float,
 ) -> Dict[str, Any]:
-    """
-    Call the ParaSwap /transactions endpoint to build execution calldata.
-    """
     url = f"{_API_BASE_URL}{_TX_ENDPOINT.format(network_id=chain_id)}"
 
     payload: Dict[str, Any] = {
@@ -168,7 +154,7 @@ async def _fetch_transaction(
 
 class ParaSwapAggregator(SwapAggregator):
     name: str = "paraswap"
-    TIMEOUT_SECONDS: float = 6.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,
@@ -180,21 +166,18 @@ class ParaSwapAggregator(SwapAggregator):
         slippage_pct: float,
         sender: str,
     ) -> Optional[SwapRouteQuote]:
-        """
-        Fetch a ParaSwap quote and build execution calldata.
-        """
-        # ── Guard: check if chain is known/supported ──────────────────────
+        # Guard: check if chain is known/supported
         try:
             get_chain_by_id(chain_id)
         except KeyError:
             self._log_debug(f"chain_id {chain_id} not in global config")
             return None
 
-        # ── Normalise token addresses ─────────────────────────────────────
+        # Normalise token addresses
         src_token = _normalise_token_address(token_in, chain_id)
         dest_token = _normalise_token_address(token_out, chain_id)
 
-        # ── Resolve decimals ──────────────────────────────────────────────
+        # ── Resolve decimals
         try:
             # We resolve decimals using normalized addresses so native tokens
             # are correctly identified via the ParaSwap sentinel or zero address.
@@ -217,7 +200,6 @@ class ParaSwapAggregator(SwapAggregator):
         src_amount_wei = _to_wei(amount_in, src_decimals)
         timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
 
-        # ── Phase 1: prices ───────────────────────────────────────────────
         try:
             prices_data = await _fetch_prices(
                 chain_id,
@@ -237,7 +219,7 @@ class ParaSwapAggregator(SwapAggregator):
             self._log_failure("prices unexpected error", exc)
             return None
 
-        # ── Parse price route ─────────────────────────────────────────────
+        # Parse price route
         price_route = prices_data.get("priceRoute") or {}
         if not price_route:
             self._log_failure("prices response missing priceRoute")
@@ -261,14 +243,14 @@ class ParaSwapAggregator(SwapAggregator):
         amount_out_min = amount_out * slippage_factor
         dest_amount_min_wei = _to_wei(amount_out_min, dest_decimals)
 
-        # ── Gas estimate ──────────────────────────────────────────────────
+        # Gas estimate
         gas_estimate = 0
         try:
             gas_estimate = int(price_route.get("gasCost", 0) or 0)
         except (ValueError, TypeError):
             pass
 
-        # ── Gas cost in USD ───────────────────────────────────────────────
+        # Gas cost in USD
         gas_cost_usd: Optional[Decimal] = None
         raw_gas_usd = price_route.get("gasCostUSD")
         if raw_gas_usd:
@@ -277,10 +259,12 @@ class ParaSwapAggregator(SwapAggregator):
             except Exception:
                 pass
 
-        # ── Price impact ──────────────────────────────────────────────────
+        # Price impact
         price_impact_pct = Decimal("0")
         # Try specific impact fields first, then fallback to USD value delta.
-        raw_impact = price_route.get("priceImpact") or price_route.get("maxImpactReached")
+        raw_impact = price_route.get("priceImpact") or price_route.get(
+            "maxImpactReached"
+        )
         if raw_impact is not None:
             try:
                 price_impact_pct = Decimal(str(raw_impact))
@@ -300,10 +284,10 @@ class ParaSwapAggregator(SwapAggregator):
                 except Exception:
                     pass
 
-        # ── Token transfer proxy (approval address) ───────────────────────
+        # Token transfer proxy (approval address)
         approval_address: Optional[str] = price_route.get("tokenTransferProxy") or None
 
-        # ── Phase 2: build transaction calldata ───────────────────────────
+        # build transaction calldata
         calldata: Optional[str] = None
         to_address: Optional[str] = None
         tx_data: Dict[str, Any] | None = None
@@ -326,7 +310,9 @@ class ParaSwapAggregator(SwapAggregator):
             to_address = tx_data.get("to") or None
 
         except ExternalServiceError as exc:
-            self._log_debug(f"transaction build failed for ParaSwap (quote still valid): {exc}")
+            self._log_debug(
+                f"transaction build failed for ParaSwap (quote still valid): {exc}"
+            )
         except Exception as exc:
             self._log_failure("transaction build unexpected error", exc)
 

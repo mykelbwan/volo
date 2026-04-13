@@ -27,7 +27,7 @@ class GuardrailService:
         if self.policy is None:
             return True
 
-        # 1. Enforce Max Retries
+        # Enforce Max Retries
         if self.policy.max_retries_per_step is not None:
             node_max_retries = node.retry_policy.get("max_retries", 0)
             if node_max_retries > self.policy.max_retries_per_step:
@@ -36,7 +36,7 @@ class GuardrailService:
                     f"requested {node_max_retries}, but global limit is {self.policy.max_retries_per_step}"
                 )
 
-        # 2. Enforce Max Slippage (if applicable)
+        # Enforce Max Slippage (if applicable)
         if self.policy.max_slippage_percent is not None and "slippage" in node.args:
             requested_slippage = float(node.args["slippage"])
             if requested_slippage > self.policy.max_slippage_percent:
@@ -45,7 +45,7 @@ class GuardrailService:
                     f"requested {requested_slippage}%, but global limit is {self.policy.max_slippage_percent}%"
                 )
 
-        # 3. Enforce Chain Whitelist/Blacklist
+        # Enforce Chain Whitelist/Blacklist
         if self.policy.blocked_chains:
             chain = node.args.get("chain") or node.args.get("source_chain")
             if chain and chain.lower() in [
@@ -55,7 +55,7 @@ class GuardrailService:
                     f"Node '{node.id}' attempts to use blocked chain: {chain}"
                 )
 
-        # 4. Enforce Parallelism Limit
+        # Enforce Parallelism Limit
         if self.policy.max_parallel_nodes is not None:
             running_nodes = [
                 sid
@@ -68,7 +68,7 @@ class GuardrailService:
                     f"limit is {self.policy.max_parallel_nodes}"
                 )
 
-        # 5. Enforce Minimum Amount (to prevent spam/dust)
+        # Enforce Minimum Amount (to prevent spam/dust)
         if self.policy.min_amount_usd is not None:
             try:
                 min_amount = float(self.policy.min_amount_usd)

@@ -142,11 +142,6 @@ def format_user_event(data: dict) -> str | None:
     status = str(data.get("status") or "").strip().upper()
     stage = str(data.get("stage") or "").strip().lower()
     summary = _single_line_summary(data.get("summary"))
-    # raw_recovery_hint = data.get("recovery_hint") or data.get("user_message")
-    # recovery_hint = recovery_hint_from_message(raw_recovery_hint)
-    # category_hint = _category_recovery_hint(
-    #     data.get("error_category") or data.get("category")
-    # )
 
     if event == "node_progress":
         return progress_stage_message(stage)

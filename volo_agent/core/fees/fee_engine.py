@@ -14,27 +14,22 @@ from core.planning.execution_plan import ExecutionPlan, PlanNode
 # Zero address used as a placeholder for native tokens in EVM contexts.
 _NATIVE = "0x0000000000000000000000000000000000000000"
 
-# ---------------------------------------------------------------------------
 # Per-activity fee table (basis points, 1 bps = 0.01%).
 #
 # Rationale:
 #   swap     — straightforward single-chain operation, lowest risk.
 #   bridge   — cross-chain, longer settlement, more protocol risk.
 #   default  — safe fallback for any future tool not yet in the table.
-# ---------------------------------------------------------------------------
 FEE_TABLE: Dict[str, int] = {
     "swap": 20,  # 0.20 %
-    "bridge": 35,  # 0.35 %
+    "bridge": 10,  # 0.10 %
 }
 DEFAULT_FEE_BPS: int = 20
 
-# ---------------------------------------------------------------------------
 # Maximum discount that can ever be applied regardless of how many rules
 # stack.  Prevents giving the service away for free.
-# ---------------------------------------------------------------------------
 MAX_DISCOUNT_BPS: int = 50
 
-# ---------------------------------------------------------------------------
 # Flat native-token fee used for ERC-20 input transactions.
 #
 # When the user swaps or bridges an ERC-20 token we have no price oracle in
@@ -47,7 +42,6 @@ MAX_DISCOUNT_BPS: int = 50
 #   bridge   ≈ $3.00 on Ethereum
 #
 # They will be replaced by oracle-derived amounts in a future iteration.
-# ---------------------------------------------------------------------------
 FLAT_FEE_NATIVE_ERC20: Dict[str, Decimal] = {
     "swap": Decimal("0.0005"),
     "bridge": Decimal("0.001"),
@@ -56,30 +50,11 @@ DEFAULT_FLAT_FEE: Decimal = Decimal("0.0005")
 
 
 class FeeEngine:
-    """
-    Stateless fee-quoting engine.
-
-    Usage (inside balance_check_node):
-
-        engine  = FeeEngine()
-        context = FeeContext(sender=sender_address)
-        quotes  = engine.quote_plan(plan, context)
-
-    The engine is disabled (returns empty list) when the
-    FEE_TREASURY_ADDRESS environment variable is not set, so the system
-    works correctly in development without any fee configuration.
-    """
-
     def __init__(self) -> None:
         self._reducer: FeeReducer = FeeReducer()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     @property
     def is_enabled(self) -> bool:
-        """True when at least one fee treasury has been configured."""
         families = ("evm", "solana")
         return any(get_fee_treasury(family) for family in families)
 
@@ -126,17 +101,6 @@ class FeeEngine:
         node: PlanNode,
         context: FeeContext,
     ) -> Optional[FeeQuote]:
-        """
-        Produce a :class:`FeeQuote` for a single *node*.
-
-        Returns ``None`` if:
-          - the fee engine is disabled (no treasury address).
-          - the node's chain cannot be resolved.
-          - the node has no chain arg (e.g. a planning-only node).
-
-        The quote is valid for :data:`FEE_QUOTE_TTL_SECONDS` seconds.
-        balance_check_node will reject quotes that have expired.
-        """
         if not self.is_enabled:
             return None
         if node.tool in ("check_balance", "transfer", "unwrap"):
@@ -145,7 +109,6 @@ class FeeEngine:
         args = node.args
         activity = self._activity_key(node.tool)
 
-        # ── Resolve chain ────────────────────────────────────────────────
         chain = resolve_fee_chain(args, tool=node.tool)
         if chain is None:
             return None
@@ -153,16 +116,13 @@ class FeeEngine:
         if not treasury:
             return None
 
-        # ── Base fee from activity table ─────────────────────────────────
         base_bps: int = FEE_TABLE.get(activity, DEFAULT_FEE_BPS)
-
-        # ── Apply reduction rules ────────────────────────────────────────
         discount_bps, discount_reasons = self._reducer.compute_discount(context)
         # Hard cap: never discount beyond MAX_DISCOUNT_BPS
         discount_bps = min(discount_bps, MAX_DISCOUNT_BPS)
         final_bps: int = max(base_bps - discount_bps, 0)
 
-        # ── Determine whether the input token is native ──────────────────
+        # Determine whether the input token is native
         # swap   → token_in_address
         # bridge → source_address
         token_address: Optional[str] = (
@@ -174,7 +134,7 @@ class FeeEngine:
         )
         is_native_tx: bool = is_native_token(token_address, chain)
 
-        # ── Compute fee amount in native token ───────────────────────────
+        # Compute fee amount in native token 
         fee_amount_native: Decimal
 
         if is_native_tx:
@@ -222,13 +182,6 @@ class FeeEngine:
         plan: ExecutionPlan,
         context: FeeContext,
     ) -> List[FeeQuote]:
-        """
-        Produce one :class:`FeeQuote` for every node in *plan* that can be
-        quoted.  Nodes that return ``None`` from :meth:`quote_node` (e.g.
-        planning-only stubs without a chain) are silently skipped.
-
-        Returns an empty list when the engine is disabled.
-        """
         if not self.is_enabled:
             return []
 

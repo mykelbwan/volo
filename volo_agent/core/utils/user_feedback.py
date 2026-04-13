@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Tuple
+from typing import Any, Iterable, Tuple
+
+from config.chains import get_chain_by_name
+from config.solana_chains import get_solana_chain
+
+_MAX_CHAIN_OPTIONS_IN_PROMPT = 6
 
 
 class FeedbackTone(str, Enum):
@@ -88,14 +93,156 @@ def _join_with_and(items: list[str]) -> str:
     return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
-def intent_missing_info(missing_slots: Iterable[str]) -> UserFeedback:
+def _display_chain_name(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    lowered = raw.lower()
+    try:
+        return str(get_chain_by_name(lowered).name or raw).strip()
+    except Exception:
+        pass
+
+    try:
+        chain = get_solana_chain(lowered)
+        return str(chain.name or chain.network or raw).strip()
+    except Exception:
+        pass
+
+    words = [part for part in raw.replace("-", " ").split(" ") if part]
+    if not words:
+        return raw
+    return " ".join(word[0:1].upper() + word[1:] for word in words)
+
+
+def _coerce_chain_options(raw_options: object) -> list[str]:
+    if not isinstance(raw_options, list):
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in raw_options:
+        value = str(item or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(value)
+    return deduped
+
+
+def _is_token_native_on_chain(token_symbol: str, chain_value: str) -> bool | None:
+    token = str(token_symbol or "").strip().upper()
+    chain = str(chain_value or "").strip().lower()
+    if not token or not chain:
+        return None
+
+    try:
+        return (
+            token == str(get_chain_by_name(chain).native_symbol or "").strip().upper()
+        )
+    except Exception:
+        pass
+
+    try:
+        return token == str(get_solana_chain(chain).native_symbol or "").strip().upper()
+    except Exception:
+        pass
+
+    return None
+
+
+def _all_options_native(token_symbol: str, chain_options: list[str]) -> bool:
+    if not chain_options:
+        return False
+    for chain in chain_options:
+        is_native = _is_token_native_on_chain(token_symbol, chain)
+        if is_native is not True:
+            return False
+    return True
+
+
+def chain_ambiguity_prompt(
+    *,
+    token_symbol: str | None,
+    chain_options: object,
+    slot_name: str | None = None,
+) -> str | None:
+    options = _coerce_chain_options(chain_options)
+    if len(options) < 2:
+        return None
+
+    token = str(token_symbol or "").strip().upper()
+    if not token:
+        return None
+
+    slot = str(slot_name or "").strip().lower()
+    if len(options) > _MAX_CHAIN_OPTIONS_IN_PROMPT:
+        if slot == "target_chain":
+            return (
+                f"{token} is available on multiple destination chains. "
+                "Which destination chain should I use?"
+            )
+        return f"{token} is available on multiple chains. Which chain should I use?"
+
+    chain_names = [_display_chain_name(chain) for chain in options]
+    chain_list = _join_with_and([name for name in chain_names if name])
+    if not chain_list:
+        return None
+
+    if slot == "target_chain":
+        suffix = "Which destination chain should I use?"
+    else:
+        suffix = "Which chain should I use?"
+    return f"{token} is available on {chain_list}. {suffix}"
+
+
+def chain_ambiguity_from_payload(payload: object) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+
+    slot_name = str(payload.get("slot_name") or "").strip().lower()
+    token_symbol = str(payload.get("token_symbol") or "").strip().upper()
+    chain_options = _coerce_chain_options(payload.get("chain_options"))
+
+    if slot_name not in {"chain", "target_chain"}:
+        return None
+    if not token_symbol or len(chain_options) < 2:
+        return None
+    return {
+        "slot_name": slot_name,
+        "token_symbol": token_symbol,
+        "chain_options": chain_options,
+    }
+
+
+def intent_missing_info(
+    missing_slots: Iterable[str],
+    *,
+    chain_ambiguity: object = None,
+) -> UserFeedback:
     missing = [str(s).strip() for s in missing_slots if str(s).strip()]
     if not missing:
         return intent_parsing_failed()
 
     if len(missing) == 1:
         slot = missing[0]
-        message = _missing_slot_question(slot)
+        message = None
+        context = chain_ambiguity_from_payload(chain_ambiguity)
+        if (
+            context
+            and slot in {"chain", "target_chain"}
+            and context["slot_name"] == slot
+        ):
+            message = chain_ambiguity_prompt(
+                token_symbol=context.get("token_symbol"),
+                chain_options=context.get("chain_options"),
+                slot_name=context.get("slot_name"),
+            )
+        if not message:
+            message = _missing_slot_question(slot)
         if not message:
             message = f"Please share the {_missing_slot_label(slot)}."
     else:
@@ -108,7 +255,7 @@ def intent_missing_info(missing_slots: Iterable[str]) -> UserFeedback:
 def intent_resolution_failed(detail: str | None = None) -> UserFeedback:
     message = (
         "I couldn't resolve that token or chain. Please confirm the amount, token "
-        "symbol, and chain (e.g., swap 1 STT to NIA on Somnia testnet)."
+        "symbol, and chain (e.g., buy 1 eth worth of pepe)."
     )
     if detail:
         message = f"{message}\n\nDetails: {detail}"

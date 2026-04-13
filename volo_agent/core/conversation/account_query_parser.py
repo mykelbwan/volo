@@ -16,7 +16,6 @@ from core.utils.balance_chains import (
     is_all_supported_chain_request,
 )
 
-# --- TAG Constants ---
 TAG_BALANCE = "bal"
 TAG_ADDRESS = "addr"
 TAG_WALLET = "wal"
@@ -24,7 +23,6 @@ TAG_ACTION = "act"
 TAG_REQUEST = "req"
 TAG_TOKEN = "tok"
 
-# --- Unified Registry for O(1) Lookup ---
 _INTENT_REGISTRY: dict[str, set[str]] = {
     "address": {TAG_ADDRESS},
     "addr": {TAG_ADDRESS},
@@ -58,37 +56,6 @@ _INTENT_REGISTRY: dict[str, set[str]] = {
     "see": {TAG_REQUEST},
     "check": {TAG_REQUEST},
 }
-
-_COMMON_TOKENS = {
-    "eth",
-    "sol",
-    "usdc",
-    "usdt",
-    "btc",
-    "wbtc",
-    "dai",
-    "link",
-    "matic",
-    "arb",
-    "op",
-    "bonk",
-    "wif",
-    "pepe",
-    "shib",
-    "uni",
-    "aave",
-    "crv",
-    "ldo",
-    "jup",
-    "pyth",
-    "stt",
-    "bnb",
-    "avax",
-    "pol",
-    "tokens",
-}
-for tok in _COMMON_TOKENS:
-    _INTENT_REGISTRY.setdefault(tok, set()).add(TAG_TOKEN)
 
 _BALANCE_PHRASES = {
     "how much do i have",
@@ -135,7 +102,6 @@ def _chain_phrase_index() -> dict[str, _ChainMatch]:
     index: dict[str, _ChainMatch] = {
         "evm": _ChainMatch(chain=None, family="evm", raw_hint="evm"),
     }
-    # 1. Base names (EVM)
     for alias in supported_chains():
         try:
             canonical = get_chain_by_name(alias).name.strip().lower()
@@ -150,7 +116,6 @@ def _chain_phrase_index() -> dict[str, _ChainMatch]:
         except Exception:
             continue
 
-    # 1b. Base names (Solana)
     from config.solana_chains import SOLANA_CHAINS
 
     for network in SOLANA_CHAINS:
@@ -162,7 +127,6 @@ def _chain_phrase_index() -> dict[str, _ChainMatch]:
         except Exception:
             continue
 
-    # 2. EVM Aliases
     for alias, target in EVM_CHAIN_ALIASES.items():
         try:
             canonical = get_chain_by_name(target).name.strip().lower()
@@ -171,7 +135,6 @@ def _chain_phrase_index() -> dict[str, _ChainMatch]:
             )
         except Exception:
             continue
-    # 3. Solana Aliases
     for alias, target in SOLANA_CHAIN_ALIASES.items():
         try:
             canonical = get_solana_chain(target).network
@@ -180,7 +143,6 @@ def _chain_phrase_index() -> dict[str, _ChainMatch]:
             )
         except Exception:
             continue
-    # print(f"DEBUG: Index keys: {list(index.keys())}")
     return index
 
 
@@ -281,26 +243,24 @@ def _resolve_chain_match(tokens: list[str], normalized: str) -> _ChainMatch | No
         return None
     index = _chain_phrase_index()
 
-    # 1. Exact multi-word spans (Fast path)
+    # Exact multi-word spans (Fast path)
     for span in _extract_spans(tokens):
         if span in index:
-            match = index[span]
-            if match.raw_hint not in _COMMON_TOKENS or len(tokens) == 1:
-                return match
+            return index[span]
 
-    # 2. Special markers (All supported)
+    # Special markers (All supported)
     if is_all_supported_chain_request(normalized) or "all chains" in normalized:
         return _ChainMatch(
             chain=ALL_SUPPORTED_CHAIN_KEY, family="evm", raw_hint="all_supported"
         )
 
-    # 3. Canonical phrases
+    # Canonical phrases
     direct = canonicalize_balance_chain(normalized)
     if direct:
         family: ChainFamily = "solana" if "solana" in direct else "evm"
         return _ChainMatch(chain=direct, family=family, raw_hint=normalized)
 
-    # 4. Fuzzy matches for longer strings
+    # Fuzzy matches for longer strings
     keys = _chain_phrase_keys()
     for span in _extract_spans(tokens):
         if len(span) >= 5:
@@ -308,7 +268,7 @@ def _resolve_chain_match(tokens: list[str], normalized: str) -> _ChainMatch | No
             if m:
                 return index[m[0]]
 
-    # 4. Fallback to common token disambiguation
+    # Final fallback to exact spans
     for span in _extract_spans(tokens):
         if span in index:
             return index[span]

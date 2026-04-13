@@ -1,20 +1,3 @@
-"""
-MongoDBSaver – a LangGraph BaseCheckpointSaver backed by MongoDB.
-
-Uses the application-wide ``MongoDB`` singleton (``core.database.mongodb``)
-so that all checkpointer I/O shares the same ``MongoClient`` connection pool
-as the rest of the application.  No second client is ever created.
-
-Three collections are used (all in the existing "auraagent" database):
-
-  lg_checkpoints        – one doc per (thread_id, checkpoint_ns, checkpoint_id)
-  lg_checkpoint_blobs   – one doc per (thread_id, checkpoint_ns, channel, version)
-  lg_checkpoint_writes  – one doc per pending node write
-
-This mirrors the InMemorySaver storage layout but persists across process
-restarts, enabling event-driven execution and multi-instance deployments.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -39,7 +22,6 @@ from pymongo.database import Database
 
 from core.database.mongodb import MongoDB
 
-# ── Collection name constants ────────────────────────────────────────────────
 _COL_CHECKPOINTS = "lg_checkpoints"
 _COL_BLOBS = "lg_checkpoint_blobs"
 _COL_WRITES = "lg_checkpoint_writes"
@@ -50,22 +32,6 @@ logger = logging.getLogger(__name__)
 
 
 class MongoDBSaver(BaseCheckpointSaver):
-    """
-    Persistent LangGraph checkpointer backed by MongoDB (pymongo).
-
-    Usage
-    -----
-    Replace ``MemorySaver`` in graph.py::
-
-        from core.database.mongodb_saver import MongoDBSaver
-        checkpointer = MongoDBSaver()
-        app = workflow.compile(checkpointer=checkpointer)
-
-    The saver creates all necessary indexes on first instantiation.  It
-    reuses the shared ``MongoDB`` singleton so no additional ``MongoClient``
-    connections are opened.
-    """
-
     _db: Database
     _checkpoints: Collection
     _blobs: Collection
@@ -80,10 +46,7 @@ class MongoDBSaver(BaseCheckpointSaver):
         self._writes = self._db[_COL_WRITES]
         self._ensure_indexes()
 
-    # ── Index setup ──────────────────────────────────────────────────────────
-
     def _ensure_indexes(self) -> None:
-        """Create compound indexes for efficient lookups (idempotent)."""
         # Checkpoint lookup by (thread, ns, id) – unique primary key
         self._checkpoints.create_index(
             [
@@ -265,10 +228,7 @@ class MongoDBSaver(BaseCheckpointSaver):
                 }
             )
 
-    # ── Version generator ────────────────────────────────────────────────────
-
     def get_next_version(self, current: Optional[str], channel: Any) -> str:  # type: ignore[override]
-        """Produce a monotonically increasing version string."""
         if current is None:
             current_v = 0
         elif isinstance(current, int):
@@ -279,18 +239,12 @@ class MongoDBSaver(BaseCheckpointSaver):
         next_h = random.random()
         return f"{next_v:032}.{next_h:016}"
 
-    # ── Internal helpers ─────────────────────────────────────────────────────
-
     def _load_blobs(
         self,
         thread_id: str,
         checkpoint_ns: str,
         channel_versions: dict[str, Any],
     ) -> dict[str, Any]:
-        """
-        Reconstruct channel_values for a checkpoint by fetching blobs from
-        MongoDB that correspond to the channel versions stored in the checkpoint.
-        """
         if not channel_versions:
             return {}
 
@@ -390,16 +344,7 @@ class MongoDBSaver(BaseCheckpointSaver):
             pending_writes=pending_writes,
         )
 
-    # ── BaseCheckpointSaver interface ────────────────────────────────────────
-
     def get_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
-        """
-        Retrieve the latest (or specific) checkpoint for a thread.
-
-        If config contains a ``checkpoint_id`` key, that exact checkpoint is
-        returned; otherwise the checkpoint with the lexicographically greatest
-        checkpoint_id (i.e. the most recent) is returned.
-        """
         cfg = config.get("configurable") or {}
         thread_id: str = cfg["thread_id"]
         checkpoint_ns: str = cfg.get("checkpoint_ns", "")
@@ -433,9 +378,6 @@ class MongoDBSaver(BaseCheckpointSaver):
         before: Optional[RunnableConfig] = None,
         limit: Optional[int] = None,
     ) -> Iterator[CheckpointTuple]:
-        """
-        Yield CheckpointTuples matching the given criteria, newest first.
-        """
         query: dict[str, Any] = {}
 
         if config is not None:
@@ -472,13 +414,6 @@ class MongoDBSaver(BaseCheckpointSaver):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        """
-        Persist a checkpoint to MongoDB.
-
-        Channel values are stripped from the checkpoint and stored separately
-        in ``lg_checkpoint_blobs`` (one document per channel version) to keep
-        checkpoint documents small and queries fast.
-        """
         cfg = config.get("configurable") or {}
         thread_id: str = cfg["thread_id"]
         checkpoint_ns: str = cfg.get("checkpoint_ns", "")
@@ -488,7 +423,6 @@ class MongoDBSaver(BaseCheckpointSaver):
         c = checkpoint.copy()
         channel_values: dict[str, Any] = c.pop("channel_values", {})  # type: ignore[misc]
 
-        # ── Upsert blobs ─────────────────────────────────────────────────────
         for channel, version in new_versions.items():
             if channel in channel_values:
                 blob_type, blob_data = self.serde.dumps_typed(channel_values[channel])
@@ -511,12 +445,12 @@ class MongoDBSaver(BaseCheckpointSaver):
                 upsert=True,
             )
 
-        # ── Serialise checkpoint + metadata ──────────────────────────────────
+        # Serialise checkpoint + metadata
         chk_type, chk_bytes = self.serde.dumps_typed(c)
         merged_metadata = get_checkpoint_metadata(config, metadata)
         meta_type, meta_bytes = self.serde.dumps_typed(merged_metadata)
 
-        # ── Upsert checkpoint document ────────────────────────────────────────
+        # Upsert checkpoint document
         self._checkpoints.update_one(
             {
                 "thread_id": thread_id,
@@ -558,11 +492,6 @@ class MongoDBSaver(BaseCheckpointSaver):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        """
-        Persist a list of intermediate node writes for a given checkpoint.
-        Writes are idempotent: a write with the same (task_id, idx) pair is
-        never overwritten unless it has a negative index (special channels).
-        """
         cfg = config.get("configurable") or {}
         thread_id: str = cfg["thread_id"]
         checkpoint_ns: str = cfg.get("checkpoint_ns", "")
@@ -610,8 +539,6 @@ class MongoDBSaver(BaseCheckpointSaver):
                     upsert=True,
                 )
 
-    # ── Async wrappers (run sync methods – suitable for I/O-light use) ───────
-
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
         return await asyncio.to_thread(self.get_tuple, config)
 
@@ -649,10 +576,7 @@ class MongoDBSaver(BaseCheckpointSaver):
     ) -> None:
         await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
     def delete_thread(self, thread_id: str) -> None:
-        """Remove all checkpoint data for a thread (useful in tests)."""
         self._checkpoints.delete_many({"thread_id": thread_id})
         self._blobs.delete_many({"thread_id": thread_id})
         self._writes.delete_many({"thread_id": thread_id})

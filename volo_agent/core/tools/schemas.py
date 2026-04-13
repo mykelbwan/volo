@@ -30,10 +30,6 @@ class SwapArgs(BaseModel):
 
 
 class BridgeArgs(BaseModel):
-    """
-    Arguments for a cross-chain bridge.
-    """
-
     token_symbol: str = Field(..., description="Symbol of the token to bridge.")
     source_chain: str = Field(..., description="Name of the source blockchain.")
     target_chain: str = Field(..., description="Name of the target blockchain.")
@@ -49,10 +45,6 @@ class BridgeArgs(BaseModel):
 
 
 class TransferArgs(BaseModel):
-    """
-    Arguments for a token transfer.
-    """
-
     asset_symbol: str = Field(
         ..., description="Canonical symbol of the asset to transfer."
     )
@@ -116,10 +108,6 @@ class TransferArgs(BaseModel):
 
 
 class UnwrapArgs(BaseModel):
-    """
-    Arguments for unwrapping wrapped native assets (for example, WETH -> ETH).
-    """
-
     token_symbol: str = Field(
         ...,
         description=(
@@ -143,10 +131,6 @@ class UnwrapArgs(BaseModel):
 
 
 class BalanceArgs(BaseModel):
-    """
-    Arguments for checking wallet balances.
-    """
-
     chain: str = Field(
         ...,
         description=(
@@ -171,10 +155,6 @@ class BalanceArgs(BaseModel):
 
 
 class SolanaSwapArgs(BaseModel):
-    """
-    Arguments for a token swap on Solana
-    """
-
     token_in_symbol: str = Field(
         ..., description="Symbol of the token to swap from (e.g. 'SOL')."
     )

@@ -51,12 +51,10 @@ def _normalise_token_address(address: str, chain_id: int) -> str:
 
 
 def _to_wei(amount: Decimal, decimals: int) -> int:
-    """Convert a human-readable token amount to integer wei."""
     return int(amount * Decimal(10**decimals))
 
 
 def _from_wei(amount_wei: int, decimals: int) -> Decimal:
-    """Convert an integer wei amount to human-readable token units."""
     return Decimal(amount_wei) / Decimal(10**decimals)
 
 
@@ -67,11 +65,6 @@ async def _fetch_quote(
     amount_wei: int,
     timeout: float,
 ) -> Dict[str, Any]:
-    """
-    Call the 1inch /quote endpoint.
-    Returns the parsed JSON response dict.
-    Raises on HTTP error so the caller can handle it.
-    """
     url = f"{_API_BASE_URL}/{chain_id}/quote"
     params = {
         "src": src,
@@ -127,7 +120,7 @@ async def _fetch_swap(
 
 class OneInchAggregator(SwapAggregator):
     name: str = "1inch"
-    TIMEOUT_SECONDS: float = 5.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,
@@ -144,7 +137,7 @@ class OneInchAggregator(SwapAggregator):
             self._log_debug("ONEINCH_API_KEY not set — skipping")
             return None
 
-        # ── Guard: check if chain is known/supported ──────────────────────
+        # Guard: check if chain is known/supported 
         chain = CHAINS.get(chain_id)
         if not chain:
             self._log_debug(f"chain_id {chain_id} not in global config")
@@ -155,11 +148,11 @@ class OneInchAggregator(SwapAggregator):
             self._log_debug(f"chain_id {chain_id} is a testnet — 1inch skip")
             return None
 
-        # ── Normalise token addresses ─────────────────────────────────────
+        # Normalise token addresses 
         src = _normalise_token_address(token_in, chain_id)
         dst = _normalise_token_address(token_out, chain_id)
 
-        # ── Resolve decimals ──────────────────────────────────────────────
+        # Resolve decimals 
         try:
             in_decimals = await _resolve_decimals(
                 token_in,
@@ -180,7 +173,6 @@ class OneInchAggregator(SwapAggregator):
         amount_wei = _to_wei(amount_in, in_decimals)
         timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
 
-        # ── Phase 1: quote ────────────────────────────────────────────────
         try:
             quote_data = await _fetch_quote(
                 chain_id,
@@ -216,7 +208,6 @@ class OneInchAggregator(SwapAggregator):
 
         gas_estimate = int(quote_data.get("gas", 0))
 
-        # ── Price impact ──────────────────────────────────────────────────
         price_impact_pct = Decimal("0")
         raw_impact = quote_data.get("priceImpact")
         if raw_impact is not None:
@@ -225,7 +216,6 @@ class OneInchAggregator(SwapAggregator):
             except Exception:
                 pass
 
-        # ── Phase 2: build calldata (swap endpoint) ────────────────────────
         # We call /swap unconditionally because the RoutePlanner picks the
         # winner *after* all quotes are gathered, and we need the calldata
         # ready.

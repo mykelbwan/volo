@@ -124,10 +124,6 @@ class TaskHistoryRecord:
 
 
 class TaskHistoryRegistry:
-    """
-    Persist task lifecycle events for user-facing history.
-    """
-
     def __init__(self) -> None:
         self._collection = AsyncMongoDB.get_collection(_COLLECTION_NAME)
         self._indexes_ready = False

@@ -30,15 +30,15 @@ def merge_execution_state(
 _MAX_MESSAGE_HISTORY_DEFAULT = 80
 
 
-def _load_max_history() -> int:
-    raw = os.getenv("VOLO_MAX_MESSAGE_HISTORY", "").strip()
-    if not raw:
-        return _MAX_MESSAGE_HISTORY_DEFAULT
-    try:
-        value = int(raw)
-        return value if value >= 0 else _MAX_MESSAGE_HISTORY_DEFAULT
-    except ValueError:
-        return _MAX_MESSAGE_HISTORY_DEFAULT
+# def _load_max_history() -> int:
+#     raw = os.getenv("VOLO_MAX_MESSAGE_HISTORY", "").strip()
+#     if not raw:
+#         return _MAX_MESSAGE_HISTORY_DEFAULT
+#     try:
+#         value = int(raw)
+#         return value if value >= 0 else _MAX_MESSAGE_HISTORY_DEFAULT
+#     except ValueError:
+#         return _MAX_MESSAGE_HISTORY_DEFAULT
 
 
 # Cached for performance — avoid repeated os.getenv calls
@@ -69,14 +69,14 @@ def add_messages_bounded(left, right):
 
 
 class AgentState(TypedDict):
-    user_id: str  
-    provider: str  
-    username: Optional[str] 
-    user_info: Optional[Dict[str, Any]]  
+    user_id: str
+    provider: str
+    username: Optional[str]
+    user_info: Optional[Dict[str, Any]]
     intents: List[Dict[str, Any]]
     plans: List[Dict[str, Any]]
-    goal_parameters: Dict[str, Any] 
-    plan_history: Annotated[List[ExecutionPlan], add_logs] 
+    goal_parameters: Dict[str, Any]
+    plan_history: Annotated[List[ExecutionPlan], add_logs]
     candidate_plans: Optional[List[ExecutionPlan]]
     execution_state: Annotated[Optional[ExecutionState], merge_execution_state]
     artifacts: dict
@@ -84,7 +84,7 @@ class AgentState(TypedDict):
     route_decision: Optional[str]
     confirmation_status: Optional[str]
     pending_transactions: List[dict]
-    reasoning_logs: Annotated[List[str], add_logs] 
+    reasoning_logs: Annotated[List[str], add_logs]
     messages: Annotated[List[BaseMessage], add_messages_bounded]
     fee_quotes: Optional[List[Dict[str, Any]]]
     balance_snapshot: Optional[Dict[str, str]]

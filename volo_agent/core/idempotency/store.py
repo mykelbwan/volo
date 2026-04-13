@@ -277,9 +277,6 @@ class IdempotencyStore:
         metadata: Dict[str, Any],
         ttl_seconds: int = PENDING_TTL_SECONDS,
     ) -> Tuple[IdempotencyRecord, bool]:
-        """
-        Claim an idempotency key. Returns (record, claimed).
-        """
         self._ensure_indexes()
         now = _utcnow()
         doc = self._claim_doc(

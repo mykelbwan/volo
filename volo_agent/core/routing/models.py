@@ -37,7 +37,6 @@ class SwapRouteQuote(StaleMixin):
     raw: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dict (Decimal → str, raw omitted)."""
         return {
             "aggregator": self.aggregator,
             "chain_id": self.chain_id,
@@ -100,7 +99,6 @@ class SolanaSwapRouteQuote:
         return (time.time() - self.fetched_at) > ttl_seconds
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dict (Decimal → str, raw omitted)."""
         return {
             "aggregator": self.aggregator,
             "network": self.network,
@@ -227,11 +225,9 @@ class RouteDecision:
     _DEFAULT_TTL: float = 45.0
 
     def is_stale(self, ttl_seconds: float = _DEFAULT_TTL) -> bool:
-        """True if the decision is older than *ttl_seconds*."""
         return (time.time() - self.decided_at) > ttl_seconds
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a JSON-serialisable dict suitable for AgentState storage."""
         return {
             "node_id": self.node_id,
             "intent_type": self.intent_type,

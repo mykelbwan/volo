@@ -44,7 +44,7 @@ def _is_sol(mint: str) -> bool:
 
 class RaydiumAggregator(SolanaSwapAggregator):
     name: str = "raydium"
-    TIMEOUT_SECONDS: float = 8.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,

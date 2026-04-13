@@ -1,28 +1,3 @@
-"""
-TriggerRegistry – manages the ``intent_triggers`` MongoDB collection.
-
-Each document in the collection represents a single pending conditional
-intent registered by the wait_for_trigger_node.  The Observer service
-queries this collection on every price/event tick to find matching triggers
-and wake the corresponding LangGraph threads.
-
-Schema
-------
-{
-    "trigger_id":        str,           # UUID, primary key
-    "user_id":           str,           # volo_user_id
-    "thread_id":         str,           # LangGraph thread_id to resume
-    "trigger_condition": dict,          # TriggerCondition.to_dict()
-    "status":            str,           # "pending" | "triggered" | "expired" | "failed" | "cancelled"
-    "payload":           dict,          # {"intents": [...]} – actions to execute on wake
-    "created_at":        str,           # ISO-8601 UTC
-    "expires_at":        str,           # ISO-8601 UTC (TTL guard)
-    "cleanup_after":     datetime | None,  # BSON Date for delayed TTL cleanup
-    "triggered_at":      str | None,    # ISO-8601 UTC, set when status → "triggered"
-    "error":             str | None,    # set when status → "failed"
-}
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -46,18 +21,6 @@ _TERMINAL_STATE_RETENTION_DAYS = {
 
 
 class TriggerRegistry:
-    """
-    CRUD interface for the ``intent_triggers`` collection.
-
-    All timestamps are stored as ISO-8601 UTC strings so they remain
-    readable in the MongoDB shell without needing BSON date helpers.
-
-    Thread-safety
-    -------------
-    The underlying Motor client is connection-pooled and safe to share
-    across asyncio tasks. Each method is async and should be awaited.
-    """
-
     def __init__(self) -> None:
         db = AsyncMongoDB.get_db()
         self.collection: AsyncIOMotorCollection = db[_COLLECTION_NAME]
@@ -66,25 +29,13 @@ class TriggerRegistry:
 
     @staticmethod
     def _terminal_retention_days(status: str) -> int:
-        """
-        Return the delayed cleanup window for a terminal trigger status.
-        """
         return _TERMINAL_STATE_RETENTION_DAYS[status]
 
     @classmethod
     def _terminal_cleanup_after(cls, status: str, now: datetime) -> datetime:
-        """
-        Compute the BSON cleanup timestamp for a terminal trigger status.
-        """
         return now + timedelta(days=cls._terminal_retention_days(status))
 
-    # ── Index setup ───────────────────────────────────────────────────────────
-
     async def _ensure_indexes(self) -> None:
-        """
-        Create compound indexes needed by the Observer query patterns.
-        All index creation calls are idempotent.
-        """
         if self._indexes_ready:
             return
 
@@ -125,8 +76,6 @@ class TriggerRegistry:
             )
             self._indexes_ready = True
 
-    # ── Write operations ──────────────────────────────────────────────────────
-
     async def register_trigger(
         self,
         user_id: str,
@@ -135,36 +84,6 @@ class TriggerRegistry:
         payload: dict[str, Any],
         ttl_days: int = _DEFAULT_TTL_DAYS,
     ) -> str:
-        """
-        Persist a new pending trigger and return its ``trigger_id``.
-
-        Parameters
-        ----------
-        user_id:
-            The internal volo_user_id of the user who set this trigger.
-        thread_id:
-            The LangGraph thread ID that should be resumed when the
-            condition fires.
-        trigger_condition:
-            Serialised ``TriggerCondition.to_dict()`` — e.g.::
-
-                {"type": "price_below", "asset": "ETH", "target": 2500.0}
-
-        payload:
-            Data to pass back to the graph on resume — typically the
-            resolved list of action intents::
-
-                {"intents": [{...swap intent...}]}
-
-        ttl_days:
-            How many days before this trigger is considered expired and
-            ignored by the Observer.  Defaults to 7 days.
-
-        Returns
-        -------
-        str
-            The newly created ``trigger_id`` (UUID hex string).
-        """
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc)
         trigger_id = str(uuid.uuid4())
@@ -188,19 +107,6 @@ class TriggerRegistry:
         return trigger_id
 
     async def mark_triggered(self, trigger_id: str) -> bool:
-        """
-        Atomically transition a trigger from ``pending`` → ``triggered``.
-
-        Uses a conditional update to guarantee idempotency — only a trigger
-        currently in ``pending`` state will be updated.  If the Observer
-        somehow fires twice, the second call is a no-op.
-
-        Returns
-        -------
-        bool
-            True if the update modified a document, False if the trigger was
-            already triggered / expired / not found.
-        """
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc)
         result = await self.collection.update_one(
@@ -219,10 +125,6 @@ class TriggerRegistry:
     async def mark_triggered_or_reschedule(
         self, trigger_id: str, next_execute_at: Optional[str]
     ) -> bool:
-        """
-        Mark a trigger as fired. If ``next_execute_at`` is provided, keep
-        it pending and reschedule the next execution time.
-        """
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc).isoformat()
         if next_execute_at:
@@ -241,10 +143,6 @@ class TriggerRegistry:
         return await self.mark_triggered(trigger_id)
 
     async def mark_failed(self, trigger_id: str, error: str) -> None:
-        """
-        Mark a trigger as ``failed`` and record the error message.
-        Used by the Observer when a resume attempt raises an exception.
-        """
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc)
         await self.collection.update_one(
@@ -259,10 +157,9 @@ class TriggerRegistry:
             },
         )
 
-    async def cancel_trigger(self, trigger_id: str, user_id: Optional[str] = None) -> bool:
-        """
-        Cancel a pending trigger. Returns True if a pending trigger was cancelled.
-        """
+    async def cancel_trigger(
+        self, trigger_id: str, user_id: Optional[str] = None
+    ) -> bool:
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc)
         query: dict[str, Any] = {"trigger_id": trigger_id, "status": "pending"}
@@ -282,18 +179,6 @@ class TriggerRegistry:
         return result.modified_count > 0
 
     async def expire_old_triggers(self) -> int:
-        """
-        Sweep all ``pending`` triggers whose ``expires_at`` timestamp is in
-        the past and transition them to ``expired``.
-
-        This is called by the Observer on each tick (cheap: one indexed
-        query + a bulk write).
-
-        Returns
-        -------
-        int
-            Number of triggers that were expired in this sweep.
-        """
         await self._ensure_indexes()
         now = datetime.now(tz=timezone.utc)
         now_iso = now.isoformat()
@@ -308,20 +193,7 @@ class TriggerRegistry:
         )
         return result.modified_count
 
-    # ── Read operations ───────────────────────────────────────────────────────
-
     async def get_pending_price_triggers(self) -> list[dict[str, Any]]:
-        """
-        Return all pending price-based triggers (price_below / price_above).
-
-        The Observer calls this on every price tick to find triggers that
-        might need to fire.  The query is covered by ``idx_status_type``.
-
-        Returns
-        -------
-        list[dict]
-            Each element is a raw MongoDB document (without ``_id``).
-        """
         await self._ensure_indexes()
         now_iso = datetime.now(tz=timezone.utc).isoformat()
         cursor = self.collection.find(
@@ -335,15 +207,6 @@ class TriggerRegistry:
         return await cursor.to_list(length=None)
 
     async def get_pending_time_triggers(self) -> list[dict[str, Any]]:
-        """
-        Return all pending time-based triggers whose ``execute_at`` is in
-        the past (i.e., it is now time to fire them).
-
-        Returns
-        -------
-        list[dict]
-            Each element is a raw MongoDB document (without ``_id``).
-        """
         await self._ensure_indexes()
         now_iso = datetime.now(tz=timezone.utc).isoformat()
         cursor = self.collection.find(
@@ -358,11 +221,6 @@ class TriggerRegistry:
         return await cursor.to_list(length=None)
 
     async def get_trigger(self, trigger_id: str) -> Optional[dict[str, Any]]:
-        """
-        Fetch a single trigger document by its ``trigger_id``.
-
-        Returns ``None`` if not found.
-        """
         await self._ensure_indexes()
         return await self.collection.find_one({"trigger_id": trigger_id}, {"_id": 0})
 
@@ -372,27 +230,6 @@ class TriggerRegistry:
         status: Optional[str] = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """
-        Return triggers for a user, optionally filtered by status.
-
-        Useful for surfacing active / historical limit orders to the user
-        via a "STATUS" conversation route.
-
-        Parameters
-        ----------
-        user_id:
-            The volo_user_id to query.
-        status:
-            If provided, filter to ``"pending"``, ``"triggered"``,
-            ``"expired"``, or ``"failed"``.
-        limit:
-            Maximum number of documents to return (default 20).
-
-        Returns
-        -------
-        list[dict]
-            Sorted newest-first by ``created_at``.
-        """
         await self._ensure_indexes()
         query: dict[str, Any] = {"user_id": user_id}
         if status:
@@ -404,29 +241,17 @@ class TriggerRegistry:
         return await cursor.to_list(length=limit)
 
     async def get_triggers_for_thread(self, thread_id: str) -> list[dict[str, Any]]:
-        """
-        Return all triggers associated with a specific LangGraph thread.
-        Useful for debugging / introspection.
-        """
         await self._ensure_indexes()
         cursor = self.collection.find({"thread_id": thread_id}, {"_id": 0})
         return await cursor.to_list(length=None)
 
-    # ── Diagnostic helpers ────────────────────────────────────────────────────
+    # Diagnostic helpers 
 
     async def count_pending(self) -> int:
-        """Return the total number of pending triggers across all users."""
         await self._ensure_indexes()
         return await self.collection.count_documents({"status": "pending"})
 
     async def summary(self) -> dict[str, int]:
-        """
-        Return a status-count summary dict — useful for operator dashboards.
-
-        Example return value::
-
-            {"pending": 42, "triggered": 118, "expired": 7, "failed": 2}
-        """
         await self._ensure_indexes()
         pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
         cursor = self.collection.aggregate(pipeline)

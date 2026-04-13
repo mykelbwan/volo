@@ -93,7 +93,6 @@ def get_ready_nodes(plan: ExecutionPlan, state: ExecutionState) -> List[PlanNode
 
 
 def create_node_running_state(node_id: str) -> ExecutionState:
-    """Returns a state delta marking a node as RUNNING."""
     return ExecutionState(
         node_states={node_id: NodeState(node_id=node_id, status=StepStatus.RUNNING)}
     )

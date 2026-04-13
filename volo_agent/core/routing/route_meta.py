@@ -321,7 +321,6 @@ def route_meta_matches_node(
             expected_amount=resolved_args.get("amount_in"),
             candidates=(
                 route_meta.get("amount_in"),
-                route_meta.get("amount_in_lamports"),
             ),
         ):
             return False

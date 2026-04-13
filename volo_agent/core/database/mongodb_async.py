@@ -1,10 +1,3 @@
-"""
-core.database.mongodb_async – async MongoDB connection singleton (Motor).
-
-This mirrors ``core.database.mongodb`` but uses ``AsyncIOMotorClient`` for
-non-blocking access from asyncio code.
-"""
-
 from __future__ import annotations
 
 import threading
@@ -20,20 +13,6 @@ from core.database.mongodb import _CLIENT_KWARGS, _DEFAULT_DB, _build_uri
 
 
 class AsyncMongoDB:
-    """
-    Process-level async MongoDB connection singleton (Motor).
-
-    Usage
-    -----
-    ::
-
-        from core.database.mongodb_async import AsyncMongoDB
-
-        db = AsyncMongoDB.get_db()
-        col = AsyncMongoDB.get_collection("intent_triggers")
-        await AsyncMongoDB.ping()
-    """
-
     _client: Optional[AsyncIOMotorClient] = None
     _client_lock = threading.Lock()
 

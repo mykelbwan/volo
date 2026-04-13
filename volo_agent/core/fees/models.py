@@ -12,34 +12,6 @@ FEE_QUOTE_TTL_SECONDS = 60
 
 @dataclass
 class FeeQuote:
-    """
-    A single fee quote attached to one PlanNode.
-
-    Lifecycle:
-        1. Created by FeeEngine.quote_plan() inside balance_check_node.
-        2. Serialised into AgentState.fee_quotes (list of dicts).
-        3. Displayed on the confirmation receipt.
-        4. Re-hydrated in execution_engine_node and collected on-chain
-           via FeeCollector after the corresponding main step succeeds.
-
-    Attributes:
-        node_id:            The PlanNode.id this quote belongs to.
-        tool:               Activity type — "swap" | "bridge".
-        chain:              Human-readable chain name (e.g. "Ethereum").
-        chain_family:       Collector family, e.g. "evm" or "solana".
-        chain_network:      Family-specific network identifier used at collection time.
-        native_symbol:      Native token symbol for the chain (e.g. "ETH").
-        base_fee_bps:       Gross fee in basis points from FEE_TABLE.
-        discount_bps:       Total discount applied (sum of all active rules).
-        final_fee_bps:      Effective fee bps after discount (base - discount).
-        fee_amount_native:  Actual amount the user will pay in native token.
-        fee_recipient:      Treasury address that receives the fee.
-        discount_reasons:   Human-readable list of applied discount rules.
-        expires_at:         Unix timestamp after which this quote is stale.
-        is_native_tx:       True when the input token is the native coin.
-                            False for ERC-20 inputs (flat fee is used instead).
-    """
-
     node_id: str
     tool: str
     chain: str
@@ -57,34 +29,17 @@ class FeeQuote:
     )
     is_native_tx: bool = False
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def is_expired(self) -> bool:
-        """Return True if the quote TTL has elapsed."""
         return int(time.time()) > self.expires_at
 
     def formatted_amount(self) -> str:
-        """Human-readable fee amount, e.g. '0.000420 ETH'."""
         return f"{self.fee_amount_native:.6f} {self.native_symbol}"
 
     def formatted_rate(self) -> str:
-        """
-        Human-readable rate string shown on the receipt.
-
-        Examples:
-            "0.20% of native amount"
-            "0.35% flat (ERC-20 tx)"
-        """
         pct = self.final_fee_bps / 100
         if self.is_native_tx:
             return f"{pct:.2f}% of amount"
         return f"{pct:.2f}% flat (ERC-20 tx)"
-
-    # ------------------------------------------------------------------
-    # Serialisation — state must hold plain dicts (JSON-serialisable)
-    # ------------------------------------------------------------------
 
     def to_dict(self) -> dict:
         return {
