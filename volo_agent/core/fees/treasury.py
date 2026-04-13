@@ -14,6 +14,8 @@ def get_fee_treasury(family: str) -> str:
         return family_specific
 
     if normalized == "evm":
-        return os.getenv("FEE_TREASURY_ADDRESS", "").strip()
+        return os.getenv("FEE_TREASURY_EVM_ADDRESS", "").strip()
+    if normalized == "solana":
+        return os.getenv("FEE_TREASURY_SOLANA_ADDRESS", "").strip()
 
     return ""
