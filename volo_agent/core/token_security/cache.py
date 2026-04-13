@@ -62,7 +62,7 @@ class TokenSecurityCache:
             # Non-fatal — log and continue; stale indexes won't break reads/writes.
             logger.warning("TokenSecurityCache: index creation warning: %s", exc)
 
-    # ── Public API ─────────────────────────────────────────────────────────────
+    # Public API 
 
     def get(self, symbol: str, chain_id: int) -> Optional[ResolvedToken]:
         key = _cache_key(symbol, chain_id)
@@ -94,7 +94,7 @@ class TokenSecurityCache:
             self._col.delete_one({"_cache_key": key})
             return None
 
-        # ── Freshness check ────────────────────────────────────────────────
+        # Freshness check 
         age = _age_days(token.last_checked)
 
         if age <= _FRESH_TTL_DAYS:
@@ -181,7 +181,7 @@ class TokenSecurityCache:
 
         return {"total": total, "by_tier": by_tier, "by_chain_id": by_chain}
 
-    # ── Background refresh ─────────────────────────────────────────────────────
+    # Background refresh 
 
     def _schedule_refresh(self, symbol: str, chain_id: int) -> None:
         if self._refresh_callback is None:

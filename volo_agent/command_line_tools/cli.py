@@ -2,12 +2,10 @@
 Usage:
   uv run command_line_tools/cli.py
   uv run command_line_tools/cli.py --skip-mongodb
-  uv run command_line_tools/cli.py --skip-mongodb --token-registry-file tokens/local/token.json
 
 Notes:
 - Set CLI_SENDER_ADDRESS and CLI_SUB_ORG_ID (e.g. in .env) to bypass MongoDB
   user lookup when running with --skip-mongodb.
-- TOKEN_REGISTRY_FALLBACK_PATH is set automatically by --token-registry-file.
 """
 
 import argparse
@@ -893,10 +891,6 @@ if __name__ == "__main__":
         help="Skip MongoDB startup health check (useful for local dev).",
     )
     parser.add_argument(
-        "--token-registry-file",
-        help="Path to a local token registry JSON file for offline testing.",
-    )
-    parser.add_argument(
         "--provider",
         default=os.getenv("VOLO_CLI_PROVIDER", DEFAULT_CLI_PROVIDER),
         help=f"Identity provider for onboarding (default: {DEFAULT_CLI_PROVIDER}).",
@@ -933,7 +927,7 @@ if __name__ == "__main__":
     )
     parser.epilog = (
         "Example:\n"
-        "  uv run command_line_tools/cli.py --skip-mongodb --token-registry-file tokens/local/token.json\n"
+        "  uv run command_line_tools/cli.py --skip-mongodb\n"
         "\n"
         "Tip: set CLI_SENDER_ADDRESS and CLI_SUB_ORG_ID in .env to bypass MongoDB user lookup."
     )
@@ -968,9 +962,6 @@ if __name__ == "__main__":
     if args.skip_mongodb:
         os.environ["SKIP_MONGODB_HEALTHCHECK"] = "1"
         os.environ["SKIP_MONGODB_USERS"] = "1"
-    if args.token_registry_file:
-        os.environ["TOKEN_REGISTRY_FALLBACK_PATH"] = args.token_registry_file
-        os.environ["SKIP_MONGODB_REGISTRY"] = "1"
     if args.verbose_debug:
         os.environ["VOLO_CLI_VERBOSE_DEBUG"] = "1"
     if args.show_status_table:

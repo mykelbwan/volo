@@ -6,7 +6,11 @@ from core.conversation.responder import respond_conversation
 from core.tasks.follow_up_state_registry import ConversationFollowUpStateRegistry
 from core.tasks.registry import resolve_conversation_id
 from core.tasks.updater import task_title_from_intent, upsert_task_from_state
-from core.utils.user_feedback import intent_missing_info, intent_parsing_failed
+from core.utils.user_feedback import (
+    chain_ambiguity_from_payload,
+    intent_missing_info,
+    intent_parsing_failed,
+)
 from graph.agent_state import AgentState
 from graph.pending_intent import (
     clarification_recovery_prompt,
@@ -71,7 +75,9 @@ async def _set_pending_follow_up_state(
     intent: Intent,
     clarification: dict[str, Any] | None,
 ) -> None:
-    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(state)
+    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(
+        state
+    )
     if not conversation_id:
         return
     expected_slot = _expected_slot_from_clarification(intent, clarification)
@@ -93,7 +99,9 @@ async def _set_pending_follow_up_state(
 
 
 async def _clear_pending_follow_up_state(state: AgentState) -> None:
-    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(state)
+    conversation_id, thread_id, selected_task_number = _follow_up_scope_from_state(
+        state
+    )
     if not conversation_id:
         return
     try:
@@ -170,6 +178,12 @@ def _output_chain(intent: Intent) -> str | None:
     return chain or None
 
 
+def _chain_ambiguity_payload_from_intent(intent: Intent) -> dict[str, Any] | None:
+    slots = intent.slots or {}
+    payload = slots.get("_chain_ambiguity")
+    return chain_ambiguity_from_payload(payload)
+
+
 def _carry_dependencies(
     anchor_intent: Intent,
     queued_intents: list[Intent],
@@ -207,15 +221,16 @@ def _carry_dependencies(
             elif prev_token and not current_token:
                 slots[token_slot] = {"symbol": prev_token}
 
-        if (
-            (carry_chain_from_prev or carry_chain_from_prev_target)
-            and not str(slots.get("chain") or "").strip()
-        ):
+        if (carry_chain_from_prev or carry_chain_from_prev_target) and not str(
+            slots.get("chain") or ""
+        ).strip():
             inherited_chain = None
             if carry_chain_from_prev_target:
                 inherited_chain = _output_chain(previous)
             if not inherited_chain and carry_chain_from_prev:
-                inherited_chain = str((previous.slots or {}).get("chain") or "").strip().lower()
+                inherited_chain = (
+                    str((previous.slots or {}).get("chain") or "").strip().lower()
+                )
             if inherited_chain:
                 slots["chain"] = inherited_chain
 
@@ -504,7 +519,10 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
                 last_resolution_error=None,
             )
             pending_clarification_state = updates["pending_clarification"]
-            feedback = intent_missing_info(intent.missing_slots)
+            feedback = intent_missing_info(
+                intent.missing_slots,
+                chain_ambiguity=_chain_ambiguity_payload_from_intent(intent),
+            )
             updates["messages"] = [AIMessage(content=feedback.render())]
             await _set_pending_follow_up_state(
                 state,
@@ -524,9 +542,8 @@ async def intent_parser_node(state: AgentState) -> Dict[str, Any]:
             )
             break
 
-    if (
-        updates.get("pending_intent") is None
-        and (pending_intent is not None or isinstance(pending_clarification, dict))
+    if updates.get("pending_intent") is None and (
+        pending_intent is not None or isinstance(pending_clarification, dict)
     ):
         await _clear_pending_follow_up_state(state)
 

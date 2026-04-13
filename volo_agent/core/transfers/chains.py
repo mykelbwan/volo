@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config.chains import find_chain_by_name
-from config.solana_chains import SOLANA_CHAINS, get_solana_chain
+from core.chains.catalog import canonicalize_chain_key, resolve_chain
 
 _EVM_NATIVE_ASSET_REF = "0x0000000000000000000000000000000000000000"
 
@@ -23,41 +22,11 @@ def _normalize_text(value: str | None) -> str:
     return str(value or "").strip().lower()
 
 
-def _canonicalize_evm_network(value: str | None) -> str | None:
-    normalized = _normalize_text(value)
-    if not normalized:
-        return None
-    try:
-        chain = find_chain_by_name(normalized)
-        return chain.name.strip().lower()
-    except KeyError:
-        return None
-
-
-def _canonicalize_solana_network(value: str | None) -> str | None:
-    normalized = _normalize_text(value)
-    if not normalized:
-        return None
-    try:
-        return get_solana_chain(normalized).network
-    except KeyError:
-        return None
-
-
 def canonicalize_transfer_network(value: str | None) -> str | None:
-    evm_network = _canonicalize_evm_network(value)
-    solana_network = _canonicalize_solana_network(value)
-
-    if evm_network and solana_network and evm_network != solana_network:
-        raise KeyError(f"Transfer network {value!r} is ambiguous across chain families.")
-
-    if evm_network:
-        return evm_network
-
-    if solana_network:
-        return solana_network
-
-    return None
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    return canonicalize_chain_key(normalized)
 
 
 def resolve_transfer_chain_spec(value: str | None) -> TransferChainSpec | None:
@@ -65,33 +34,20 @@ def resolve_transfer_chain_spec(value: str | None) -> TransferChainSpec | None:
     if not canonical:
         return None
 
-    evm_network = _canonicalize_evm_network(canonical)
-    if evm_network:
-        chain = find_chain_by_name(evm_network)
-        return TransferChainSpec(
-            family="evm",
-            network=evm_network,
-            display_name=chain.name,
-            native_symbol=chain.native_symbol,
-            explorer_url=chain.explorer_url,
-            is_testnet=bool(chain.is_testnet),
-            native_asset_ref=_EVM_NATIVE_ASSET_REF,
-        )
-
-    solana_network = _canonicalize_solana_network(canonical)
-    if solana_network and solana_network in SOLANA_CHAINS:
-        chain = SOLANA_CHAINS[solana_network]
-        return TransferChainSpec(
-            family="solana",
-            network=chain.network,
-            display_name=chain.name,
-            native_symbol=chain.native_symbol,
-            explorer_url=chain.explorer_url,
-            is_testnet=bool(chain.is_testnet),
-            native_asset_ref=chain.native_mint,
-        )
-
-    return None
+    entry = resolve_chain(canonical)
+    if entry is None:
+        return None
+    return TransferChainSpec(
+        family=entry.family,
+        network=entry.key,
+        display_name=entry.display_name,
+        native_symbol=entry.native_symbol,
+        explorer_url=entry.explorer_url,
+        is_testnet=bool(entry.is_testnet),
+        native_asset_ref=(
+            _EVM_NATIVE_ASSET_REF if entry.family == "evm" else entry.native_asset_ref
+        ),
+    )
 
 
 def get_transfer_chain_spec(value: str | None) -> TransferChainSpec:

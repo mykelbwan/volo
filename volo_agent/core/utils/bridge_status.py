@@ -122,9 +122,6 @@ async def fetch_across_status_async(
     is_testnet: bool,
     meta: Optional[dict] = None,
 ) -> Optional[str]:
-    """
-    Async version of fetch_across_status.
-    """
     base_url = _across_api_base_url(is_testnet)
 
     async def _request_status_async(params: dict) -> Optional[str]:

@@ -21,13 +21,6 @@ class WatchlistRefreshDeps:
 
 
 async def refresh_price_watchlist(deps: WatchlistRefreshDeps) -> None:
-    """
-    Rebuild the observer watchlist from pending triggers and known volume symbols.
-
-    This keeps trigger-driven token discovery separate from the watcher runtime,
-    while preserving the existing caching behavior and graceful fallbacks when
-    token metadata cannot be resolved.
-    """
     try:
         pending = await deps.get_pending_price_triggers()
     except Exception as exc:

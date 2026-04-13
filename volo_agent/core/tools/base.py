@@ -6,10 +6,6 @@ from core.memory.ledger import ErrorCategory
 
 
 class Tool(BaseModel):
-    """
-    Metadata for a tool in the registry with support for adaptive recovery.
-    """
-
     name: str
     description: str
     func: Callable
@@ -19,9 +15,6 @@ class Tool(BaseModel):
     timeout_seconds: Optional[float] = None
 
     async def run(self, args: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Runs the tool's function, optionally validating inputs first.
-        """
         if self.args_schema:
             # Create a copy for validation that replaces markers with dummy values
             validation_args = args.copy()

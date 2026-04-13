@@ -260,7 +260,7 @@ async def wait_for_trigger_node(
                 "messages": [
                     AIMessage(
                         content=(
-                            "⚠️ I couldn't save your trigger to the database. "
+                            "I couldn't save your trigger to the database. "
                             "Please try again in a moment."
                         )
                     )

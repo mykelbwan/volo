@@ -216,9 +216,7 @@ def _should_isolate_latest_user_turn(messages: Sequence[BaseMessage]) -> bool:
 
 
 def _build_context_facts(state: dict[str, Any] | None, messages: Sequence[BaseMessage] | None = None) -> str:
-    facts = []
-    
-    # 1. Chain Knowledge (Milestone 4)
+    facts = []    
     facts.append(_get_chain_summary())
     
     if state:
@@ -243,7 +241,6 @@ def _build_context_facts(state: dict[str, Any] | None, messages: Sequence[BaseMe
                 else:
                     facts.append("A transaction is currently in progress.")
 
-    # 2. Typo Hinting (Milestone 4)
     if messages:
         last_user = _latest_user_text(messages).lower()
         if last_user:

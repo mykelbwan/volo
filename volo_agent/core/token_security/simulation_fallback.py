@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional, cast
 
+from config.solana_chains import SOL_DECIMALS, _KNOWN_DECIMALS, is_solana_chain_id
 from web3 import Web3
 from web3.exceptions import ContractLogicError
 from web3.types import Wei
@@ -15,13 +16,11 @@ from core.token_security.models import (
     SecurityFlag,
     SecurityTier,
 )
+from core.token_security.registry_lookup import get_registry_decimals_by_address
 
 logger = logging.getLogger(__name__)
 
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-# The "dead" address is used as the simulated sender and transfer recipient.
-# It is unlikely to be blacklisted on legitimate tokens.
+_KNOWN_SOLANA_DECIMALS_LOWER = {k.lower(): v for k, v in _KNOWN_DECIMALS.items()}
 _DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD"
 
 # Gas limit above which we consider the transfer hook suspiciously complex.
@@ -77,6 +76,12 @@ class SimulationFallback:
         chain_id = candidate.chain_id
         liquidity_usd = candidate.liquidity_usd
 
+        if is_solana_chain_id(chain_id):
+            return self._scan_solana_candidate(
+                candidate=candidate,
+                rpc_url=rpc_url,
+            )
+
         # Normalise address to Web3 checksum format
         try:
             w3 = Web3(Web3.HTTPProvider(rpc_url))
@@ -126,6 +131,73 @@ class SimulationFallback:
 
         logger.info("SimulationFallback: %s", report.short_summary())
         return report
+
+    def _scan_solana_candidate(
+        self,
+        candidate: DexscreenerCandidate,
+        rpc_url: str,
+    ) -> SimulationReport:
+        address_raw = candidate.address.strip()
+        chain_id = candidate.chain_id
+        liquidity_usd = candidate.liquidity_usd
+
+        if not self._is_valid_solana_address(address_raw):
+            logger.warning(
+                "SimulationFallback: invalid Solana mint %r for chain %d",
+                address_raw,
+                chain_id,
+            )
+            return SimulationReport(
+                address=address_raw,
+                chain_id=chain_id,
+                rpc_url=rpc_url,
+                symbol=candidate.symbol,
+                liquidity_usd=liquidity_usd,
+                flags=[SecurityFlag.SIMULATION_REVERTED],
+                security_tier=SecurityTier.UNVERIFIED,
+            )
+
+        report = SimulationReport(
+            address=address_raw,
+            chain_id=chain_id,
+            rpc_url=rpc_url,
+            symbol=candidate.symbol,
+            liquidity_usd=liquidity_usd,
+        )
+        report.decimals = self._resolve_solana_decimals(address_raw, chain_id)
+        self._check_liquidity(report)
+        report.security_tier = SecurityTier.FALLBACK_HEURISTIC
+        if SecurityFlag.UNVERIFIED_SOURCE not in report.flags:
+            report.flags.append(SecurityFlag.UNVERIFIED_SOURCE)
+        logger.info("SimulationFallback: %s", report.short_summary())
+        return report
+
+    def _resolve_solana_decimals(self, mint: str, chain_id: int) -> int:
+        try:
+            decimals = get_registry_decimals_by_address(mint, chain_id)
+            if decimals is not None:
+                return int(decimals)
+        except Exception as exc:
+            logger.debug(
+                "SimulationFallback: sync decimals lookup failed for Solana mint %s: %s",
+                mint[:10],
+                exc,
+            )
+
+        known = _KNOWN_SOLANA_DECIMALS_LOWER.get(mint.lower())
+        if known is not None:
+            return int(known)
+
+        return SOL_DECIMALS
+
+    def _is_valid_solana_address(self, address: str) -> bool:
+        try:
+            from solders.pubkey import Pubkey  # noqa: PLC0415
+
+            Pubkey.from_string(address)
+            return True
+        except Exception:
+            return False
 
     def scan_address(
         self,

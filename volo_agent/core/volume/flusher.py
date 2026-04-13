@@ -146,7 +146,7 @@ async def _flush_once(redis: object, watcher: VolumeWatcherAccess) -> int:
     if not primary_keys:
         return 0
 
-    # ── Parse keys, skip invalid ones ────────────────────────────────────────
+    # Parse keys, skip invalid ones 
     valid: list[tuple[str, dict[str, str], bool]] = []
     for key in primary_keys:
         meta = parse_volume_key(key)

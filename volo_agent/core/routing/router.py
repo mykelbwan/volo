@@ -953,7 +953,6 @@ class RoutePlanner:
         chain_name: str,
         chain_id: int,
     ) -> Optional[SwapRouteQuote]:
-        """Wrap the internal Uniswap V3 simulator as an async quote source."""
         from tool_nodes.dex.swap_simulator_v3 import simulate_swap
 
         try:
@@ -984,7 +983,6 @@ class RoutePlanner:
         chain_name: str,
         chain_id: int,
     ) -> Optional[SwapRouteQuote]:
-        """Wrap the internal Uniswap V2 simulator as an async quote source."""
         from tool_nodes.dex.swap_simulator_v2 import simulate_swap_v2
 
         try:
@@ -1109,7 +1107,6 @@ class RoutePlanner:
         sender: str,
         recipient: str,
     ) -> Optional[BridgeRouteQuote]:
-        """Wrap the internal Relay simulator as an async quote source."""
         from config.bridge_registry import RELAY, relay_api_base_url
         from tool_nodes.bridge.simulators.relay_simulator import simulate_relay_bridge
 

@@ -69,28 +69,6 @@ async def collect_fee(
     quote: FeeQuote,
     node_args: Dict[str, Any],
 ) -> Optional[str]:
-    """
-    Execute the platform fee as a native transfer to the treasury.
-
-    Called inside execution_engine_node immediately after a main step
-    succeeds.  Failures are intentionally non-fatal — the main transaction
-    has already been committed on-chain, so we log the error and let the
-    graph continue rather than surfacing a confusing failure to the user.
-
-    Args:
-        quote:      The FeeQuote computed by FeeEngine for this node.
-        node_args:  The resolved args dict of the corresponding PlanNode.
-                    Must contain "sender" and "sub_org_id".
-
-    Returns:
-        The fee transfer tx hash on success, or None if collection was
-        skipped (treasury not configured, zero-fee, or missing wallet info).
-
-    Raises:
-        FeeCollectionError: If the transfer is attempted but fails
-                            (caller should catch and log, not re-raise).
-    """
-    # ── Guard: nothing to collect ────────────────────────────────────────────
     if not quote.fee_recipient:
         logger.warning("[FEE] No treasury address configured — fee skipped.")
         return None

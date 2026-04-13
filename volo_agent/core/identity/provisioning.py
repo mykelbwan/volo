@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Protocol, TypeAlias, runtime_checkable
 ProvisioningPayload: TypeAlias = Dict[str, Any]
 ProvisioningFn: TypeAlias = Callable[[str], ProvisioningPayload]
 
+
 @runtime_checkable
 class WalletProvisioner(Protocol):
     @property
@@ -44,12 +45,14 @@ def _default_solana_provision(volo_user_id: str) -> ProvisioningPayload:
         create_sub_org as create_solana_sub_org,
     )
 
-    return create_solana_sub_org(volo_user_id)
+    return  create_solana_sub_org(volo_user_id)
 
 
 class EvmWalletProvisioner(FunctionWalletProvisioner):
     def __init__(self, provision_fn: ProvisioningFn | None = None) -> None:
-        super().__init__(chain_label="EVM", provision_fn=provision_fn or _default_evm_provision)
+        super().__init__(
+            chain_label="EVM", provision_fn=provision_fn or _default_evm_provision
+        )
 
 
 class SolanaWalletProvisioner(FunctionWalletProvisioner):

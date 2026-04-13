@@ -31,7 +31,7 @@ class SecurityFlag(str, Enum):
     BLACKLISTED = "blacklisted"
     """GoPlus flagged the contract as a known scam/rug."""
 
-    # ── High-risk flags (token is returned but flagged) ───────────────────
+    # High-risk flags (token is returned but flagged) 
     HIGH_BUY_TAX = "high_buy_tax"
     """Buy tax > 10 %."""
 
@@ -50,7 +50,7 @@ class SecurityFlag(str, Enum):
     ANTI_WHALE = "anti_whale"
     """Large transfers are capped — may affect institutional-sized trades."""
 
-    # ── Informational flags (low risk, surface to user only) ─────────────
+    # Informational flags (low risk, surface to user only) 
     LOW_LIQUIDITY = "low_liquidity"
     """USD liquidity in the primary DEX pair is below the $10k threshold."""
 

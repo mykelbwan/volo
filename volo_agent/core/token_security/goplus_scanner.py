@@ -8,7 +8,6 @@ from typing import Optional
 from requests import HTTPError, RequestException
 
 from config.chains import CHAINS
-from config.solana_chains import SOLANA_CHAINS
 from core.token_security.models import (
     CRITICAL_TAX_THRESHOLD,
     HIGH_TAX_THRESHOLD,
@@ -30,13 +29,11 @@ _MAX_BATCH_SIZE: int = 10
 _API_KEY: str = os.getenv("GOPLUS_API_KEY", "")
 
 def _build_goplus_supported_chain_ids() -> frozenset[int]:
-    chain_ids = {
+    # GoPlus token security checks are currently EVM-oriented in this code path.
+    # Non-EVM networks (for example Solana) are handled by non-EVM fallback.
+    return frozenset(
         chain.chain_id for chain in CHAINS.values() if not chain.is_testnet
-    }
-    chain_ids.update(
-        chain.chain_id for chain in SOLANA_CHAINS.values() if not chain.is_testnet
     )
-    return frozenset(chain_ids)
 
 
 # Unsupported/testnet chains automatically fall back to simulation.

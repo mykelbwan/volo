@@ -95,10 +95,6 @@ def request_json(
     service: str | None = None,
     **kwargs: Any,
 ) -> requests.Response:
-    """
-    Make an HTTP request with retries and a default timeout.
-    Returns the raw response so callers can handle error formatting.
-    """
     start = time.perf_counter()
     if "timeout" not in kwargs:
         kwargs["timeout"] = timeout
@@ -143,10 +139,6 @@ async def async_request_json(
     service: str | None = None,
     **kwargs: Any,
 ) -> httpx.Response:
-    """
-    Async HTTP request with retries and a default timeout.
-    Returns the raw response so callers can handle error formatting.
-    """
     start = time.perf_counter()
     method = str(method or "").upper().strip()
     if not method:

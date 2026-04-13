@@ -27,11 +27,6 @@ BRIDGE_FILL_TIME_MAX_BONUS: float = 0.001
 GAS_PENALTY_FALLBACK_USD: Decimal = Decimal("1.0")
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _get_success_rate(
     ledger: PerformanceLedger,
     aggregator: str,
@@ -120,9 +115,6 @@ def pick_best_swap(
     ledger: PerformanceLedger,
     chain_name: str,
 ) -> Optional[Tuple["SwapRouteQuote", float]]:
-    """
-    Return ``(best_quote, score)`` or ``None`` if *quotes* is empty.
-    """
     ranked = rank_swap_quotes(quotes, ledger, chain_name)
     return ranked[0] if ranked else None
 
@@ -131,9 +123,6 @@ def pick_best_bridge(
     quotes: List["BridgeRouteQuote"],
     ledger: PerformanceLedger,
 ) -> Optional[Tuple["BridgeRouteQuote", float]]:
-    """
-    Return ``(best_quote, score)`` or ``None`` if *quotes* is empty.
-    """
     ranked = rank_bridge_quotes(quotes, ledger)
     return ranked[0] if ranked else None
 
@@ -143,15 +132,8 @@ def score_solana_swap_quote(
 ) -> float:
     sr = _get_success_rate(ledger, quote.aggregator, quote.network)
     weight = _success_rate_weight(sr)
-
     output = float(quote.amount_out)
-
-    # Small penalty for high price impact so that a route with a slightly
-    # better output but much worse market impact does not win blindly.
-    # Impact is expressed as a percentage (e.g. 0.5 = 0.5 %), so we scale
-    # it relative to the output to keep units consistent.
     impact_penalty = float(quote.price_impact_pct) * 0.01 * output
-
     return output * weight - impact_penalty
 
 

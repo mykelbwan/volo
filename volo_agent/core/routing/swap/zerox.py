@@ -30,7 +30,7 @@ def _api_key() -> Optional[str]:
     return os.getenv("ZEROX_API_KEY", "").strip() or None
 
 
-def _auth_headers() -> Dict[str, str]:
+def _auth_headers() -> Dict[str, str]: 
     headers: Dict[str, str] = {"0x-version": _ZEROX_API_VERSION}
     key = _api_key()
     if key:
@@ -101,7 +101,7 @@ async def _fetch_quote(
 
 class ZeroXAggregator(SwapAggregator):
     name: str = "0x"
-    TIMEOUT_SECONDS: float = 5.0
+    TIMEOUT_SECONDS: float = 60.0
 
     async def get_quote(
         self,
@@ -113,23 +113,23 @@ class ZeroXAggregator(SwapAggregator):
         slippage_pct: float,
         sender: str,
     ) -> Optional[SwapRouteQuote]:
-        # ── Guard: API key ────────────────────────────────────────────────
+        # Guard: API key 
         if not _api_key():
             self._log_debug("ZEROX_API_KEY not set — skipping")
             return None
 
-        # ── Guard: check if chain is known/supported ──────────────────────
+        # Guard: check if chain is known/supported 
         try:
             get_chain_by_id(chain_id)
         except KeyError:
             self._log_debug(f"chain_id {chain_id} not in global config")
             return None
 
-        # ── Normalise token addresses ─────────────────────────────────────
+        # Normalise token addresses 
         sell_token = _normalise_token_address(token_in)
         buy_token = _normalise_token_address(token_out)
 
-        # ── Resolve decimals ──────────────────────────────────────────────
+        # Resolve decimals 
         in_decimals = await _resolve_decimals(
             token_in,
             chain_id,
@@ -150,7 +150,7 @@ class ZeroXAggregator(SwapAggregator):
 
         timeout = min(self.TIMEOUT_SECONDS, EXTERNAL_HTTP_TIMEOUT_SECONDS)
 
-        # ── Fetch quote + calldata in one request ─────────────────────────
+        # Fetch quote + calldata in one request 
         try:
             data = await _fetch_quote(
                 chain_id,
@@ -168,7 +168,7 @@ class ZeroXAggregator(SwapAggregator):
             self._log_failure("unexpected error", exc)
             return None
 
-        # ── Parse output amount ───────────────────────────────────────────
+        # Parse output amount 
         raw_buy = data.get("buyAmount")
         if not raw_buy:
             self._log_failure("response missing buyAmount")
@@ -195,19 +195,17 @@ class ZeroXAggregator(SwapAggregator):
             slippage_factor = Decimal(str(1.0 - slippage_pct / 100.0))
             amount_out_min = amount_out * slippage_factor
 
-        # ── Gas estimate ──────────────────────────────────────────────────
+        # Gas estimate 
         gas_estimate = 0
         try:
             gas_estimate = int(data.get("estimatedGas", 0) or 0)
         except (ValueError, TypeError):
             pass
 
-        # ── Gas cost in USD ───────────────────────────────────────────────
         # 0x API v2 /quote does not return gas cost in USD.
         # estimatedGasPrice is in wei.
         gas_cost_usd: Optional[Decimal] = None
 
-        # ── Price impact ──────────────────────────────────────────────────
         # 0x v2 surfaces price impact under different keys depending on the
         # route type.  We try the most specific key first.
         price_impact_pct = Decimal("0")
@@ -220,12 +218,10 @@ class ZeroXAggregator(SwapAggregator):
                 except Exception:
                     pass
 
-        # ── Transaction (calldata + target address) ───────────────────────
         tx: Dict[str, Any] = data.get("transaction") or {}
         calldata: Optional[str] = tx.get("data") or None
         to_address: Optional[str] = tx.get("to") or None
 
-        # ── Permit2 approval address ──────────────────────────────────────
         # If ``issues.allowance`` is present, the taker must approve the
         # specified spender (the Permit2 contract) for the sell token.
         approval_address: Optional[str] = None
