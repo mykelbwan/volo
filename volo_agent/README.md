@@ -95,5 +95,3 @@ uv run command_line_tools/cli.py --skip-mongodb --show-status-table
 
 ---
 
-## License
-MIT
