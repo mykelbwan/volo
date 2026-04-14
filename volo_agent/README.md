@@ -4,7 +4,7 @@
 
 Unlike traditional linear agents, Volo supports **Massively Parallel Intent Execution (MPIE)**, allowing a single session to manage multiple independent transaction lanes concurrently with strict resource isolation.
 
-[docs/MPIE_ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/docs/MPIE_ARCHITECTURE.md) - conversational-level MPIE architecture, wait/resume flow, and security model.
+---
 
 ## 🚀 Key Features
 
