@@ -8,7 +8,6 @@ from langgraph.graph import END, START, StateGraph
 from core.database.mongodb_saver import MongoDBSaver
 from core.database.mongodb_saver_async import AsyncMongoDBSaver
 from core.planning.execution_plan import ExecutionPlan, ExecutionState, StepStatus
-from core.utils.gc_runtime import configure_gc_runtime
 from core.utils.telemetry import wrap_node
 from core.utils.timeouts import resolve_tool_timeout
 from graph.agent_state import AgentState
@@ -37,8 +36,6 @@ from graph.nodes.vws_preflight_node import vws_preflight_node
 from graph.nodes.wait_for_funds_node import wait_for_funds_node
 from graph.nodes.wait_for_trigger_node import wait_for_trigger_node
 from intent_hub.ontology.intent import IntentStatus
-
-configure_gc_runtime()
 
 workflow = StateGraph(AgentState)
 
