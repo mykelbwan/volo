@@ -6,7 +6,7 @@ Unlike traditional linear agents, Volo supports **Massively Parallel Intent Exec
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 ### 1. Natural Language to DAG Pipeline
 Volo decomposes complex, multi-step prompts into a strictly typed execution plan. It automatically infers dependencies between actions (e.g., waiting for a bridge to complete before starting a swap).
@@ -87,7 +87,7 @@ uv run command_line_tools/cli.py --skip-mongodb --show-status-table
 
 ---
 
-## 📚 Documentation
+## Documentation
 *   [ARCHITECTURE.md](https://github.com/mykelbwan/volo/blob/master/volo_agent/ARCHITECTURE.md) - Deep dive into MPIE, DAG planning, and the safety model.
 *   [docs/DAG_ARCHITECTURE.md](https://github.com/mykelbwan/volo/tree/master/volo_agent/docs/DAG_ARCHITECTURE.md) - Scheduling and execution-state model.
 *   [docs/BRIDGE_STATUS_WORKER.md](https://github.com/mykelbwan/volo/tree/master/volo_agent/docs/BRIDGE_STATUS_WORKER.md) - Bridge status worker notes.
@@ -95,5 +95,5 @@ uv run command_line_tools/cli.py --skip-mongodb --show-status-table
 
 ---
 
-## ⚖️ License
+## License
 MIT
