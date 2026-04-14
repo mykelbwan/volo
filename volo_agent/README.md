@@ -94,3 +94,6 @@ uv run command_line_tools/cli.py --skip-mongodb --show-status-table
 *   [docs/MPIE_ARCHITECTURE.md](https://github.com/mykelbwan/volo/tree/master/volo_agent/docs/MPIE_ARCHITECTURE.md) - Conversational-level MPIE and wait/resume flow.
 
 ---
+
+## License
+MIT
