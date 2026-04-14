@@ -30,7 +30,7 @@ A unified interface for both **EVM** (Ethereum, Base, Arbitrum, etc.) and **Sola
 
 ---
 
-## 🛠 How it Works: The Intent-to-DAG Pipeline
+## How it Works: The Intent-to-DAG Pipeline
 
 When you give Volo a command, it goes through three stages:
 
