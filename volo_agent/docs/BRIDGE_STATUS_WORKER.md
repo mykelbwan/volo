@@ -1,101 +1,42 @@
-# Bridge Status Worker
+# Bridge Status Worker: Asynchronous State Finalizer
 
-This worker polls bridge transactions stored in LangGraph state and updates
-their status on every tick. It is designed to run as a **separate process**
-from the main application.
+## Purpose
 
-## What It Does
+The **Bridge Status Worker** is a decoupled state manager that handles the "Dark Period" of cross-chain bridging. Since bridges can take minutes or hours to finalize, the main agent process suspends execution. This worker is responsible for polling those transactions and "nudging" the agent back to life once funds arrive.
 
-- Reads `pending_transactions` from the latest checkpoint of each thread.
-- For bridge records, calls the appropriate protocol status provider.
-- Updates per‑tick fields:
-  - `last_status`
-  - `last_status_raw`
-  - `last_checked_at`
-- Marks terminal results:
-  - `status = SUCCESS` when filled
-  - `status = FAILED` when refunded/expired
-- Updates the LangGraph execution state if `node_id` is present.
+## Architecture
 
-## Requirements
+The worker operates as a background loop, independent of the main API or Agent processes. It follows a **Pull-Notify** model:
 
-- MongoDB must be reachable (same DB used by the app).
-- `SKIP_MONGODB_HEALTHCHECK` must **not** be set, otherwise the graph
-  will use `MemorySaver` and updates won’t persist.
+1.  **Poll:** It identifies active LangGraph threads with `pending_transactions` of type `bridge`.
+2.  **Verify:** It calls the protocol-specific provider (Across, Relay, etc.) to check on-chain finality.
+3.  **Inject:** It surgicaly updates the LangGraph checkpoint with the new status.
+4.  **Resume:** It triggers a re-execution of the graph to continue the intent workflow.
 
-## How It Works (High Level)
+## Behavioral Proof: The "Nudge" Pattern
 
-1. Enumerate `(thread_id, checkpoint_ns)` pairs from `lg_checkpoints`.
-2. Load the latest state for each thread via `graph.app.get_state(...)`.
-3. Poll status for bridge records using the protocol registry in
-   `core/utils/bridge_status_registry.py`.
-4. Write state updates back with `graph.app.update_state(...)`.
+Live simulation verifies that the worker does not just update data; it acts as a **Graph Activator**.
 
-## Usage
+### Verified Execution Flow
+*   **State Detection:** The worker uses `app.get_state()` to read the `pending_transactions` and `execution_state` directly from the thread's checkpoint.
+*   **Atomic Injection:** Updates are written back via `app.update_state(..., as_node="execution_engine")`. This ensures that when the graph wakes up, it is positioned correctly at the execution frontier.
+*   **Graph Resumption:** Upon finalization (SUCCESS or FAILED), the worker calls `app.invoke(None, config)`. This is the "Nudge" that restarts the paused LangGraph workflow.
 
-Run continuously:
+## Distributed Coordination & Locking
 
-```bash
-uv run command_line_tools/bridge_status_worker.py --interval 15
-```
+To scale horizontally and prevent redundant RPC calls, the worker implements a **Distributed Locking** mechanism.
 
-Run once:
+*   **Thread Locks:** Uses the `bridge_status_worker_locks` collection in MongoDB.
+*   **Owner Identification:** Each worker process uses a unique `owner` ID to claim specific `thread_id:checkpoint_ns` pairs.
+*   **TTL Safety:** Locks are self-expiring via MongoDB TTL indexes, ensuring that if a worker process crashes, other workers can pick up the slack within 30 seconds.
 
-```bash
-uv run command_line_tools/bridge_status_worker.py --once
-```
+## Protocol Registry
 
-## Configuration
+Status providers are modular and registered in `core/utils/bridge_status_registry.py`.
 
-Environment variables:
+*   **Across:** Polls the Across Relayer API for `fill` events.
+*   **Relay:** Polls the Relay API using the `request_id` stored in the bridge metadata.
 
-- `BRIDGE_STATUS_WORKER_INTERVAL_SECONDS` (default: `15`)
-- `BRIDGE_STATUS_WORKER_LOCK_TTL_SECONDS` (default: `30`)
+## Summary
 
-CLI flags override env vars.
-
-## Locking
-
-The worker uses a per‑thread lock in MongoDB (`bridge_status_worker_locks`)
-to avoid duplicate polling across multiple worker instances. Lock acquisition
-and index setup live in `core/bridge_status_worker_locks.py`; the CLI script
-just consumes that logic. Locks now store `expires_at` as a MongoDB date and a
-TTL index auto-deletes expired date-based lock documents. Legacy numeric
-expiries are still accepted during the transition until they are overwritten by
-the new format. Set `--lock-ttl-seconds 0` to disable locking.
-
-## Protocol Support
-
-Protocol status providers are registered in:
-
-```
-core/utils/bridge_status_registry.py
-```
-
-Currently registered:
-
-- `across`
-- `relay`
-
-To add new protocols, implement a provider with:
-
-- `fetch_status(tx_hash, is_testnet, meta=None)`
-- `interpret_status(raw_status)`
-
-Then register it via:
-
-```
-register_bridge_status_provider("protocol_name", Provider())
-```
-
-## Notes
-
-- The worker does **not** execute nodes; it only updates state.
-- It only processes records where `type == "bridge"`.
-- Bridge records should include:
-  - `protocol`
-  - `tx_hash`
-  - `node_id` (optional but required to update execution state)
-  - `meta.request_id` for Relay status polling
-- Bridge executors should return after broadcast with `status = pending`;
-  the worker is responsible for finalization.
+The Bridge Status Worker transforms the agent from a synchronous "script" into a **Durable Asynchronous Workflow**. By managing the cross-chain waiting period externally, it ensures that user intents are completed reliably without tying up active compute resources or requiring the user to manually "refresh" their session.

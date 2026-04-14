@@ -89,7 +89,7 @@ class FeeEngine:
         default_by_family = {
             "evm": FLAT_FEE_NATIVE_ERC20,
             "solana": {
-                "swap": Decimal("0.005"),
+                "swap": Decimal("0.01"),
                 "bridge": Decimal("0.010"),
             },
         }
