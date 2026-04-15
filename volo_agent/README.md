@@ -1,6 +1,6 @@
-# Volo: Massively Parallel Intent-Based Crypto Agent
+# Volo: Reliable Execution For Complex Onchain Actions
 
-**Volo** is a high-performance, intent-based crypto agent that abstracts blockchain complexity. It enables users to execute multi-turn, cross-chain transactions (swaps, bridges, transfers) through simple natural language, managed by a dependency-aware Directed Acyclic Graph (DAG) execution engine.
+**Volo** is an execution copilot for serious crypto users. It helps users execute complex, multi-step, cross-chain actions through simple natural language, with a dependency-aware workflow engine built for safety, async recovery, and dependable completion.
 
 Unlike traditional linear agents, Volo supports **Massively Parallel Intent Execution (MPIE)**, allowing a single session to manage multiple independent transaction lanes concurrently with strict resource isolation.
 
@@ -20,13 +20,18 @@ Volo treats every new intent as an independent "Task Lane."
 
 ### 3. Durable Asynchronous Workflows
 Volo is designed for the "Ghost Transaction" and "Slow Bridge" reality of crypto.
-*   **Background Workers:** Dedicated workers (Bridge Status, Funds Wait) monitor long-running operations and "nudge" the execution graph back to life using LangGraph's `Command(resume=...)`.
+*   **Background Workers:** Dedicated workers (Bridge Status, Funds Wait) monitor long-running operations and resume paused execution from persisted graph state.
 *   **Idempotency & Safety:** Prevents double-spending through atomic claiming and nonce-gap probing.
 
 ### 4. Cross-Chain Parity
 A unified interface for both **EVM** (Ethereum, Base, Arbitrum, etc.) and **Solana**.
 *   **Normalization:** Unified handling of native tokens (ETH/SOL) and addresses.
 *   **Ecosystem Isolation:** Prevents cross-ecosystem fee routing or address leakage.
+
+### 5. Built For Serious Crypto Users
+Volo is strongest when execution gets messy.
+*   **Complex Onchain Actions:** Bridge, swap, transfer, wait, and continue from one command.
+*   **Confidence Under Complexity:** Designed to reduce manual coordination, retry anxiety, and broken multi-step flows.
 
 ---
 
@@ -66,17 +71,30 @@ uv sync
 ### Configuration
 Create a `.env` file in the root:
 ```env
-# LLM Provider (Google, OpenAI, Cohere, etc.)
-GOOGLE_API_KEY=your_key
-
-# Database
+# Core app
 MONGODB_URI=mongodb://localhost:27017
 REDIS_URL=redis://localhost:6379
+
+# Coinbase / CDP wallet execution
+CDP_API_KEY_ID=your_key_id
+CDP_API_KEY_SECRET=your_key_secret
+CDP_WALLET_SECRET=your_wallet_secret
+
+# Security / model providers used by the current runtime
+GOPLUS_SECURITY_KEY=your_key
+GEMINI_API_KEY1=...
+GEMINI_API_KEY2=...
+COHERE_API_KEY=your_key
+HUGGINGFACE_API_KEY=your_key
 
 # Treasury Addresses
 FEE_TREASURY_EVM_ADDRESS=0x...
 FEE_TREASURY_SOLANA_ADDRESS=...
 ```
+
+Notes:
+*   The checked-in runtime currently expects more than a minimal demo `.env`. See [config/env.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/config/env.py) for the live set of required variables.
+*   Fee routing is family-specific. `FEE_TREASURY_EVM_ADDRESS` and `FEE_TREASURY_SOLANA_ADDRESS` are the active treasury variables used by the fee engine.
 
 ### Running the CLI
 Volo comes with a feature-rich CLI for testing.
@@ -84,6 +102,15 @@ Volo comes with a feature-rich CLI for testing.
 # Run with status tables and debug logs
 uv run command_line_tools/cli.py --skip-mongodb --show-status-table
 ```
+
+### Running the API
+Volo also exposes a turn-based API.
+```bash
+uv run uvicorn main:app --reload
+```
+
+Primary endpoint:
+*   `POST /v1/agent/turn` - submit one user turn and receive the latest assistant reply for the selected task lane / thread.
 
 ---
 

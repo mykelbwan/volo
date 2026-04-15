@@ -1,80 +1,146 @@
 # Volo User Onboarding Guide
 
-This document explains the lifecycle of a Volo user, from their first interaction to having fully provisioned multi-chain wallets.
+This document explains the current user onboarding and identity flow in Volo, based on the checked-in runtime.
+
+It focuses on what the code is doing today:
+- identity lookup and registration
+- EVM + Solana wallet provisioning
+- account linking
+- policy loading before execution
 
 ---
 
-## 1. Onboarding Flowchart
+## 1. Current Onboarding Flow
 
-The following diagram visualizes how Volo handles new users and secures their cross-chain identity.
+At the graph level, onboarding happens before parsing or execution in [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py).
+
+High-level flow:
 
 ```mermaid
 graph TD
-    Start[User Message] --> ResolveID[resolve_conversation_id]
-    ResolveID --> CheckDB{Identity in MongoDB?}
-    
-    %% New User Path
-    CheckDB -- No --> Register[register_user]
-    Register --> UUID[Generate uuid4 volo_user_id]
-    UUID --> ParallelProv[Parallel Wallet Provisioning]
-    subgraph Provisioning
-        ParallelProv --> EVM[EVM: create_sub_org]
-        ParallelProv --> SOL[Solana: create_sub_org]
-    end
-    EVM --> Save[Insert User Document]
-    SOL --> Save
-    Save --> Ready[Status: ACTIVE]
+    Start[User Turn] --> Lookup[Load identity by provider + provider_user_id]
+    Lookup --> Exists{User exists?}
 
-    %% Existing User Path
-    CheckDB -- Yes --> Sync[sync_username]
-    Sync --> CheckGaps{Missing evm/solana_address?}
-    CheckGaps -- Yes --> Reprov[ensure_multi_chain_wallets]
-    Reprov --> SaveUpdate[Update MongoDB Record]
-    CheckGaps -- No --> Ready
-    
-    SaveUpdate --> Ready
-    Ready --> Pipeline[Intent-to-DAG Pipeline]
+    Exists -- No --> Register[register_user]
+    Register --> Provision[Provision EVM + Solana wallets]
+    Provision --> Save[Insert identity record]
+
+    Exists -- Yes --> Sync[sync_username / refresh identity]
+    Sync --> Repair{Missing wallet fields?}
+    Repair -- Yes --> Ensure[ensure_multi_chain_wallets]
+    Repair -- No --> Continue[Continue]
+    Ensure --> Continue
+    Save --> Continue
+
+    Continue --> Policy[Load effective guardrail policy]
+    Policy --> Ready[Proceed to parser / router]
 ```
 
 ---
 
-## 2. The Provisioning Process
+## 2. Identity Model
 
-Volo uses a **"Just-in-Time" (JIT) Provisioning** model. When a user is registered, the system creates two independent "Sub-Organizations" through the `AsyncIdentityService`:
+Volo identifies a user by external identity first, then maps that identity to a single internal `volo_user_id`.
 
-### EVM Provisioning
-*   **Engine:** `EvmWalletProvisioner`
-*   **Result:** Generates a unique `sub_org_id` and an Ethereum-compatible `address`.
-*   **Scope:** Used for Ethereum, Base, Arbitrum, and other EVM-compatible networks.
+Current identity behavior lives in [core/identity/service.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/service.py).
 
-### Solana Provisioning
-*   **Engine:** `SolanaWalletProvisioner`
-*   **Result:** Generates a unique `solana_sub_org_id` and a Base58 `solana_address`.
-*   **Scope:** Used exclusively for Solana mainnet/testnet interactions.
+What is stored for an active user today:
+- `volo_user_id`
+- one or more external identities in `identities`
+- EVM wallet fields such as `evm_sub_org_id` and `evm_address`
+- Solana wallet fields such as `solana_sub_org_id` and `solana_address`
+- metadata and activity flags
 
----
-
-## 3. Account Linking & Multi-Identity
-
-Volo allows you to link multiple external identities (e.g., Discord, Telegram, Website) to the same set of wallets.
-
-1.  **Generate Link Token:** An existing user can request a short-lived token (`LinkTokenManager`).
-2.  **Claim Token:** Using a new identity, the user provides the token.
-3.  **Merge:** The `AsyncIdentityService` attaches the new `provider_user_id` to the existing `volo_user_id`.
+The service supports:
+- lookup by provider identity
+- registration of a new user
+- wallet reprovision / repair for missing chain fields
+- link-token based identity attachment
 
 ---
 
-## 4. First Intent (The "Hello World")
+## 3. Wallet Provisioning
 
-Once onboarded, your first transaction typically follows this pattern:
+Wallet provisioning is implemented in [core/identity/provisioning.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/provisioning.py).
 
-1.  **Deposit:** Send native gas (ETH or SOL) to your newly provisioned address.
-2.  **Query:** Ask Volo `"What's my balance on Base?"`.
-3.  **Action:** Ask Volo `"Swap 0.01 ETH for USDC on Base"`.
+Current behavior:
+- EVM and Solana wallets are provisioned as separate bundles
+- both provisioners are invoked during `register_user`
+- the runtime expects each provisioner to return a dict with `sub_org_id` and `address`
+- invalid or incomplete provisioner output fails onboarding clearly
+
+Provisioners used by default:
+- `EvmWalletProvisioner`
+- `SolanaWalletProvisioner`
+
+Operational note:
+- onboarding is not only "first user registration"
+- existing users can also be repaired if one side of the wallet bundle is missing
 
 ---
 
-## 5. Technical Safety Note
+## 4. Link Tokens And Multi-Identity
 
-*   **Idempotency:** Provisioning is atomic. If one chain fails, the system will attempt to `reprovision` it during the next interaction without creating duplicate identities.
-*   **Isolation:** EVM and Solana sub-organizations are cryptographically isolated. Fees and treasury routing are handled per-ecosystem to prevent fund leakage.
+Account linking is implemented through short-lived link tokens in [core/identity/link_tokens.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/link_tokens.py).
+
+Current behavior:
+1. an existing Volo user can issue a link token
+2. the token is stored with expiry and usage state
+3. another provider identity can claim that token
+4. the new identity is attached to the same `volo_user_id`
+
+Important current details:
+- tokens are short-lived
+- token state is explicit: issued, used, revoked, expired
+- the manager rejects invalid, used, revoked, or expired tokens
+
+---
+
+## 5. Policy Check Before Execution
+
+The onboarding node now does more than identity setup.
+
+Before the graph proceeds into parsing/execution, it also attempts to load the effective security policy for the resolved user. That logic lives in [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py) and uses [core/security/policy_store.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/security/policy_store.py).
+
+Current behavior:
+- policy lookups are cached
+- in-flight lookups are deduplicated
+- failures can trigger a retry cooldown
+- if policy verification cannot complete, execution is paused before any action runs
+
+This matters because onboarding is now part of the safety boundary, not just identity creation.
+
+---
+
+## 6. First Real User Actions
+
+Once a user is onboarded and policy is available, the normal first interactions are closer to:
+
+1. fund the provisioned wallet
+2. ask for a balance or portfolio-style query
+3. submit a spend-capable request like a swap, bridge, transfer
+
+In the current runtime, that turn then enters the conversational task-lane system and proceeds through:
+- routing / task selection
+- intent parsing
+- plan resolution
+- preflight
+- execution
+
+---
+
+## 7. Practical Notes
+
+- onboarding is turn-driven, not a separate standalone wizard
+- user registration and wallet repair are both part of normal conversation startup
+- EVM and Solana wallets are intentionally separate
+- account linking exists, but it is identity attachment, not wallet merging
+- policy verification is now a first-class precondition for execution
+
+## 8. Source Of Truth
+
+For current behavior, prefer these files:
+- [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py)
+- [core/identity/service.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/service.py)
+- [core/identity/provisioning.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/provisioning.py)
+- [core/identity/link_tokens.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/link_tokens.py)

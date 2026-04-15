@@ -17,7 +17,7 @@ The worker runs as a background polling loop, operating as a FIFO (First-In-Firs
 Live simulation verifies the use of the **LangGraph Command Pattern** for durable state resumption.
 
 ### Verified Execution Flow
-*   **Resume Command:** The worker invokes `app.astream(Command(resume=payload), config)`. This is the definitive pattern for "thawing" a graph that was paused via `interrupt()`.
+*   **Resume Command:** The worker resumes the interrupted graph with a LangGraph resume payload. This is the pattern used to "thaw" a graph that was paused via `interrupt()`.
 *   **Secure Handshake:** The payload contains a `resume_token` (minimum 32 characters). The `wait_for_funds_node` in the graph will only proceed if this token matches the one generated during the initial suspension.
 *   **Targeted Wakeup:** The payload includes the `node_id`, ensuring that the resume signal is routed to the correct execution frontier within the thread.
 
