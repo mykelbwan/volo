@@ -93,7 +93,7 @@ FEE_TREASURY_SOLANA_ADDRESS=...
 ```
 
 Notes:
-*   The checked-in runtime currently expects more than a minimal demo `.env`. See [config/env.py](./config/env.py) for the live set of required variables.
+*   The checked-in runtime currently expects more than a minimal demo `.env`. See [config/env.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/config/env.py) for the live set of required variables.
 *   Fee routing is family-specific. `FEE_TREASURY_EVM_ADDRESS` and `FEE_TREASURY_SOLANA_ADDRESS` are the active treasury variables used by the fee engine.
 
 ### Running the CLI

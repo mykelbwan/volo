@@ -12,7 +12,7 @@ It focuses on what the code is doing today:
 
 ## 1. Current Onboarding Flow
 
-At the graph level, onboarding happens before parsing or execution in [graph/nodes/onboarding_node.py](/home/michael/dev-space/volo/volo_agent/graph/nodes/onboarding_node.py:1).
+At the graph level, onboarding happens before parsing or execution in [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py).
 
 High-level flow:
 
@@ -42,7 +42,7 @@ graph TD
 
 Volo identifies a user by external identity first, then maps that identity to a single internal `volo_user_id`.
 
-Current identity behavior lives in [core/identity/service.py](/home/michael/dev-space/volo/volo_agent/core/identity/service.py:1).
+Current identity behavior lives in [core/identity/service.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/service.py).
 
 What is stored for an active user today:
 - `volo_user_id`
@@ -61,7 +61,7 @@ The service supports:
 
 ## 3. Wallet Provisioning
 
-Wallet provisioning is implemented in [core/identity/provisioning.py](/home/michael/dev-space/volo/volo_agent/core/identity/provisioning.py:1).
+Wallet provisioning is implemented in [core/identity/provisioning.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/provisioning.py).
 
 Current behavior:
 - EVM and Solana wallets are provisioned as separate bundles
@@ -81,7 +81,7 @@ Operational note:
 
 ## 4. Link Tokens And Multi-Identity
 
-Account linking is implemented through short-lived link tokens in [core/identity/link_tokens.py](/home/michael/dev-space/volo/volo_agent/core/identity/link_tokens.py:1).
+Account linking is implemented through short-lived link tokens in [core/identity/link_tokens.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/link_tokens.py).
 
 Current behavior:
 1. an existing Volo user can issue a link token
@@ -100,7 +100,7 @@ Important current details:
 
 The onboarding node now does more than identity setup.
 
-Before the graph proceeds into parsing/execution, it also attempts to load the effective security policy for the resolved user. That logic lives in [graph/nodes/onboarding_node.py](/home/michael/dev-space/volo/volo_agent/graph/nodes/onboarding_node.py:1) and uses [core/security/policy_store.py](/home/michael/dev-space/volo/volo_agent/core/security/policy_store.py:1).
+Before the graph proceeds into parsing/execution, it also attempts to load the effective security policy for the resolved user. That logic lives in [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py) and uses [core/security/policy_store.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/security/policy_store.py).
 
 Current behavior:
 - policy lookups are cached
@@ -118,7 +118,7 @@ Once a user is onboarded and policy is available, the normal first interactions 
 
 1. fund the provisioned wallet
 2. ask for a balance or portfolio-style query
-3. submit a spend-capable request like a swap, bridge, transfer, or unwrap
+3. submit a spend-capable request like a swap, bridge, transfer
 
 In the current runtime, that turn then enters the conversational task-lane system and proceeds through:
 - routing / task selection
@@ -139,8 +139,8 @@ In the current runtime, that turn then enters the conversational task-lane syste
 
 ## 8. Source Of Truth
 
-For current behavior, prefer these files over older diagrams or summaries:
-- [graph/nodes/onboarding_node.py](/home/michael/dev-space/volo/volo_agent/graph/nodes/onboarding_node.py:1)
-- [core/identity/service.py](/home/michael/dev-space/volo/volo_agent/core/identity/service.py:1)
-- [core/identity/provisioning.py](/home/michael/dev-space/volo/volo_agent/core/identity/provisioning.py:1)
-- [core/identity/link_tokens.py](/home/michael/dev-space/volo/volo_agent/core/identity/link_tokens.py:1)
+For current behavior, prefer these files:
+- [graph/nodes/onboarding_node.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/graph/nodes/onboarding_node.py)
+- [core/identity/service.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/service.py)
+- [core/identity/provisioning.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/provisioning.py)
+- [core/identity/link_tokens.py](https://github.com/mykelbwan/volo/tree/master/volo_agent/core/identity/link_tokens.py)
