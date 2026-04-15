@@ -20,7 +20,7 @@ Live simulation verifies that the worker does not just update data; it acts as a
 ### Verified Execution Flow
 *   **State Detection:** The worker uses `app.get_state()` to read the `pending_transactions` and `execution_state` directly from the thread's checkpoint.
 *   **Atomic Injection:** Updates are written back via `app.update_state(..., as_node="execution_engine")`. This ensures that when the graph wakes up, it is positioned correctly at the execution frontier.
-*   **Graph Resumption:** Upon finalization (SUCCESS or FAILED), the worker calls `app.invoke(None, config)`. This is the "Nudge" that restarts the paused LangGraph workflow.
+*   **Graph Resumption:** Upon finalization (SUCCESS or FAILED), the worker routes the graph back into `execution_engine` using a LangGraph command. This is the "Nudge" that restarts the paused workflow from the execution frontier.
 
 ## Distributed Coordination & Locking
 

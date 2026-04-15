@@ -41,7 +41,7 @@ A node is considered **Ready** ONLY when its status is `PENDING` and every node 
 
 ### JIT Argument Resolution & Balance Probing
 *   **Deferred Binding:** Arguments (e.g., `{{OUTPUT_OF:step_X}}`) are resolved *immediately before* tool execution.
-*   **JIT Balance Probing:** The `_jit_validate_balances` method performs a final on-chain balance check against globally reserved totals right before signing, preventing "over-spend" if external transactions occurred.
+*   **JIT Balance Probing:** The execution runtime performs a final balance validation pass immediately before signing, checking live wallet balances against reservation state, fee requirements, and projected deltas to prevent over-spend if external transactions occurred.
 
 ### Double-Spend & Idempotency Protection (`core/execution/runtime.py`)
 Volo implements a "Safety Probe" to handle the "Ghost Transaction" problem (where a broadcast fails but the transaction eventually hits the mempool).
@@ -81,12 +81,12 @@ Volo handles long-running operations (like cross-chain bridges or wallet fund co
 When a task is waiting for a bridge, the execution graph suspends. The worker acts as the **Graph Activator**:
 *   **State Detection:** Identifies threads with `pending_transactions` of type `bridge`.
 *   **Atomic Injection:** Surgically updates the LangGraph checkpoint using `app.update_state(..., as_node="execution_engine")`. This ensures the graph resumes exactly at the execution frontier.
-*   **Resumption:** Triggers a re-execution by calling `app.invoke(None, config)`.
+*   **Resumption:** Triggers a re-entry into the execution frontier using a LangGraph command that routes execution back to `execution_engine`.
 
 ### The "Thaw" Pattern (Funds Wait Worker)
 When a lane is blocked by funds, it calls `interrupt()`. The worker:
 *   **FIFO Fairness:** Monitors the global queue and identifies the next eligible `FundsWaitRecord`.
-*   **Secure Resumption:** Sends a `Command(resume=payload)` to the specific thread.
+*   **Secure Resumption:** Sends a resume payload back to the specific interrupted thread.
 *   **Token Handshake:** The payload includes a cryptographically secure `resume_token`. The graph node verifies this token before allowing execution to "thaw" and proceed to the next preflight check.
 
 **Verified Observation:** Behavioral trace proved that both workers correctly restart paused LangGraph workflows, transforming the agent into a **Durable Asynchronous Workflow engine** that can survive process restarts and long cross-chain delays.
@@ -134,7 +134,7 @@ Fees are dynamically reduced based on user context using a stackable rule engine
 ### Strict Ecosystem Treasury (`core/fees/treasury.py`)
 The system enforces strict segregation of treasury funds through environment-based configuration:
 *   **Family-Specific Addressing:** Requires explicit `FEE_TREASURY_EVM_ADDRESS` and `FEE_TREASURY_SOLANA_ADDRESS`.
-*   **No Global Fallback:** The system **ignores** a generic `FEE_TREASURY_ADDRESS`. This is a safety feature to prevent cross-ecosystem fund routing.
+*   **No Global Fallback in Fee Routing:** The active treasury lookup uses family-specific addresses only. This prevents cross-ecosystem fund routing.
 *   **Fail-Safe Disable:** If a family-specific address is missing, fee collection for that ecosystem is automatically disabled (`quote_node` returns `None`), ensuring that lack of configuration never results in stuck or lost fees.
 
 **Verified Observation:** Behavioral trace proved that the engine requires explicit family-level treasury addresses to enable quoting and correctly applies multi-factor discounts (e.g., -13 bps) before calculating the final native token requirement.

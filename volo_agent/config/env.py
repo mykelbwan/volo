@@ -16,11 +16,6 @@ _alias_env("CDP_API_KEY_ID", "COINBASE_API_KEY_ID")
 _alias_env("CDP_API_KEY_SECRET", "COINBASE_SECRET_KEY")
 _alias_env("CDP_WALLET_SECRET", "COINBASE_SERVER_WALLET")
 
-
-FEE_TREASURY_ADDRESS = os.getenv("FEE_TREASURY_ADDRESS", "")
-if FEE_TREASURY_ADDRESS is None:
-    raise ValueError("FEE_TREASURY_ADDRESS environment variable is not set")
-
 SOMNIA_CHAIN = os.getenv("SOMNIA_CHAIN")
 SOMNIA_RPC_URL = os.getenv("SOMNIA_TESTNET_RPC_URL")
 
@@ -61,20 +56,9 @@ GEMINI_API_KEYS = [os.getenv(f"GEMINI_API_KEY{i}") for i in range(1, 7)]
 (
     GEMINI_API_KEY1,
     GEMINI_API_KEY2,
-    GEMINI_API_KEY3,
-    GEMINI_API_KEY4,
-    GEMINI_API_KEY5,
-    GEMINI_API_KEY6,
 ) = GEMINI_API_KEYS
 
-if (
-    GEMINI_API_KEY1 is None
-    or GEMINI_API_KEY2 is None
-    or GEMINI_API_KEY3 is None
-    or GEMINI_API_KEY4 is None
-    or GEMINI_API_KEY5 is None
-    or GEMINI_API_KEY6 is None
-):
+if GEMINI_API_KEY1 is None or GEMINI_API_KEY2 is None:
     raise ValueError("GEMINI_API_KEY environment variable is not set")
 
 GEMINI_API_KEYS = [SecretStr(key) for key in GEMINI_API_KEYS if key is not None]
@@ -82,10 +66,6 @@ GEMINI_API_KEYS = [SecretStr(key) for key in GEMINI_API_KEYS if key is not None]
 (
     GEMINI_API_KEY1,
     GEMINI_API_KEY2,
-    GEMINI_API_KEY3,
-    GEMINI_API_KEY4,
-    GEMINI_API_KEY5,
-    GEMINI_API_KEY6,
 ) = GEMINI_API_KEYS
 
 COHERE_API_KEY = os.getenv("COHERE_API_KEY")

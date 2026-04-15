@@ -4,3 +4,7 @@ __pycache__
 .pytest_cache
 tests/
 REV_GEN.md
+X_CONTENT_PLAN.md
+VOLO_POWER_USER_BRAND.md
+VOLO_COLOSSEUM_SCORECARD.md
+ignore.md
