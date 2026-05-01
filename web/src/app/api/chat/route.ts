@@ -101,6 +101,6 @@ export async function POST(req: Request) {
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("web_chat_turn_failed", detail);
-    return new Response(detail, { status: 500 });
+    return new Response("Internal server error.", { status: 500 });
   }
 }
